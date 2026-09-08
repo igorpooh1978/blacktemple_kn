@@ -3,24 +3,24 @@
   "name": "xray-core",
   "license": "MPL-2.0",
   "upstream": "https://github.com/XTLS/Xray-core",
-  "version": "v26.3.27",
-  "tag": "v26.3.27",
+  "version": "v26.7.28",
+  "tag": "v26.7.28",
   "verificationDate": "2026-09-08",
   "hardwareVerification": {
     "qemu": "NOT RUN",
     "kn-1011": "NOT RUN"
   },
-  "notes": "From official zip use xray_softfloat for KN-1011. Do not auto-follow latest. Android APK string showed Xray-Core v 26.2.6; router pin is independent.",
+  "notes": "P0 pin candidate v26.7.28 (GitHub prerelease, not latest). SHA256 taken from GitHub release asset digest, matching official .dgst SHA2-256, and matching SHA256 of the downloaded zip. Xray-linux-mips32le.zip contains xray_softfloat; ELF32 little-endian MIPS ET_EXEC static (elfcheck PASS). Xray-linux-mips32.zip also pinned. MIPS binaries were not executed on Windows. hardwareVerification.kn-1011 stays NOT RUN. Orchestrator-provided note only (not this wave's hardware run): OBSERVED_WORKING_BASELINE on KN-1011 mipsle for v26.7.28. From official zip use xray_softfloat for KN-1011. Android APK string showed Xray-Core v 26.2.6; router pin is independent. Do not auto-follow latest.",
   "targets": {
     "linux-mipsle-softfloat": {
-      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-mips32le.zip",
-      "zipSha256": "fe1ded07a64fe0a406c6c1089f09b6c2999fc2309509ca4c98d93469c0cbf9df",
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-mips32le.zip",
+      "zipSha256": "4779e1afba7dea12c64a72380f1d9737a12359f354014625a7f9d96f8d31e3fa",
       "binaryInZip": "xray_softfloat",
       "ipkArch": "mipsel-3.4_kn"
     },
     "linux-mips-softfloat": {
-      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-mips32.zip",
-      "zipSha256": "a562f2edbdabc0f1a17eee2226fa9f710e6b61c2d5e2bf3435157b5ce40b1c67",
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-mips32.zip",
+      "zipSha256": "aec600118fd1e7ee42e8d5e8d5c82cc5e8139e82ff1da029e9b81b7170fc028c",
       "binaryInZip": "xray_softfloat",
       "ipkArch": "mips-3.4"
     }
