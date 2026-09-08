@@ -1,0 +1,189 @@
+openapi: 3.0.3
+info:
+  title: BlackTemple KN HTTP API
+  version: 0.1.0-dev
+  description: |
+    Frozen v0 contract for parallel UI/backend work.
+    LAN only. Secrets are never returned in full.
+servers:
+  - url: http://{lan-host}:7480
+    variables:
+      lan-host:
+        default: 192.168.1.1
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: process alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/v1/version:
+    get:
+      operationId: version
+      responses:
+        "200":
+          description: build identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+  /api/v1/status:
+    get:
+      operationId: status
+      responses:
+        "200":
+          description: dashboard snapshot (redacted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+  /api/v1/auth/setup:
+    post:
+      operationId: firstRunSetup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "204":
+          description: password set
+        "409":
+          description: already initialized
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: session cookie set
+        "401":
+          description: invalid
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "204":
+          description: session cleared
+  /api/v1/connection:
+    post:
+      operationId: connectionControl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionCommand"
+      responses:
+        "202":
+          description: accepted
+        "501":
+          description: not implemented yet
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      responses:
+        "200":
+          description: redacted profiles
+        "501":
+          description: not implemented yet
+    post:
+      operationId: importBlackKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportKeyRequest"
+      responses:
+        "201":
+          description: created
+        "501":
+          description: not implemented yet
+components:
+  schemas:
+    Health:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+    Version:
+      type: object
+      required: [version, goos, goarch, gomips, cgo]
+      properties:
+        version: { type: string }
+        goos: { type: string }
+        goarch: { type: string }
+        gomips: { type: string }
+        cgo: { type: string }
+    Status:
+      type: object
+      required: [connection, routing, serverMode]
+      properties:
+        connection:
+          type: string
+          enum: [disconnected, connecting, connected, failed]
+        country: { type: string }
+        latencyMs:
+          type: integer
+          nullable: true
+        routing:
+          type: string
+          enum: [smart, all, selected]
+        serverMode:
+          type: string
+          enum: [auto, manual, failover, rotate]
+        key:
+          type: string
+          enum: [missing, active, invalid]
+        geodata:
+          type: string
+          enum: [missing, current, stale, unknown]
+        xray:
+          $ref: "#/components/schemas/XrayProcess"
+    XrayProcess:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [STOPPED, STARTING, RUNNING, RELOADING, FAILED, BACKOFF]
+        pid: { type: integer, nullable: true }
+        version: { type: string }
+        restartCount: { type: integer }
+    SetupRequest:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, minLength: 8 }
+    LoginRequest:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string }
+    ConnectionCommand:
+      type: object
+      required: [op]
+      properties:
+        op:
+          type: string
+          enum: [connect, disconnect, reconnect, restart-vpn, restart-manager, full-restart]
+    ImportKeyRequest:
+      type: object
+      required: [blackKey]
+      properties:
+        blackKey:
+          type: string
+          description: never echoed back
+        name:
+          type: string

@@ -1,0 +1,19 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  secrets-scan-placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: block apk and research dumps
+        run: |
+          if git ls-files | grep -E '\.apk$|\.aab$|^\.research-local/'; then
+            echo "forbidden research artifacts tracked"
+            exit 1
+          fi
+          echo "no apk/research-local tracked"

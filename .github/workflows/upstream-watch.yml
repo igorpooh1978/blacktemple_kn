@@ -1,0 +1,17 @@
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: report only
+        run: |
+          echo "Watch Xray releases. Do NOT change third_party/xray.lock.json automatically."
+          echo "Pinned: $(python3 -c "import json;print(json.load(open('third_party/xray.lock.json'))['version'])")"
+          echo "Open an issue/PR candidate; never auto-roll stable."

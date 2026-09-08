@@ -1,0 +1,13 @@
+# Agent task template
+
+```text
+WAVE:
+TASK:
+BRANCH: agent/<wave>/<task>
+BASE_SHA:
+ALLOWED_PATHS:
+FORBIDDEN_PATHS:
+DEPENDENCIES:
+ACCEPTANCE_TESTS:
+DO NOT:
+```

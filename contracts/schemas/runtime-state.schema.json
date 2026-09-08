@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blacktemple-kn.local/schemas/runtime-state.schema.json",
+  "title": "BlackTempleKNRuntimeState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "connection", "xray"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "connection": {
+      "enum": ["disconnected", "connecting", "connected", "failed"]
+    },
+    "activeProfileId": { "type": ["string", "null"] },
+    "activeServerId": { "type": ["string", "null"] },
+    "lastKnownGood": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profileId": { "type": "string" },
+        "xrayConfigPath": { "type": "string" },
+        "savedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "xray": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "enum": ["STOPPED", "STARTING", "RUNNING", "RELOADING", "FAILED", "BACKOFF"]
+        },
+        "pid": { "type": ["integer", "null"] },
+        "executable": { "type": "string" },
+        "version": { "type": "string" },
+        "startedAt": { "type": ["string", "null"] },
+        "lastExit": { "type": ["integer", "null"] },
+        "restartCount": { "type": "integer" },
+        "lastError": { "type": "string" }
+      }
+    }
+  }
+}

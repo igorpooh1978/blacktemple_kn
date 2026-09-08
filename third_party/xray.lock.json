@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "xray-core",
+  "license": "MPL-2.0",
+  "upstream": "https://github.com/XTLS/Xray-core",
+  "version": "v26.3.27",
+  "tag": "v26.3.27",
+  "verificationDate": "2026-09-08",
+  "hardwareVerification": {
+    "qemu": "NOT RUN",
+    "kn-1011": "NOT RUN"
+  },
+  "notes": "From official zip use xray_softfloat for KN-1011. Do not auto-follow latest. Android APK string showed Xray-Core v 26.2.6; router pin is independent.",
+  "targets": {
+    "linux-mipsle-softfloat": {
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-mips32le.zip",
+      "zipSha256": "fe1ded07a64fe0a406c6c1089f09b6c2999fc2309509ca4c98d93469c0cbf9df",
+      "binaryInZip": "xray_softfloat",
+      "ipkArch": "mipsel-3.4_kn"
+    },
+    "linux-mips-softfloat": {
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-mips32.zip",
+      "zipSha256": "a562f2edbdabc0f1a17eee2226fa9f710e6b61c2d5e2bf3435157b5ce40b1c67",
+      "binaryInZip": "xray_softfloat",
+      "ipkArch": "mips-3.4"
+    }
+  },
+  "stableAutoUpdate": false
+}

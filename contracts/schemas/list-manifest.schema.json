@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blacktemple-kn.local/schemas/list-manifest.schema.json",
+  "title": "RemoteListManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "lists"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "lists": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "url"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": {
+            "enum": [
+              "geoip",
+              "geosite",
+              "countries",
+              "servers",
+              "domains",
+              "telegram-ips",
+              "whatsapp-ips",
+              "provider-file"
+            ]
+          },
+          "url": { "type": "string", "format": "uri" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "etag": { "type": "string" },
+          "ttlSeconds": { "type": "integer", "minimum": 0 },
+          "enabled": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  }
+}

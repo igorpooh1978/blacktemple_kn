@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm run size
+      - name: copy ui into daemon assets
+        run: |
+          rm -rf src/cmd/blacktempled/assets/*
+          cp -a web/dist/. src/cmd/blacktempled/assets/
+      - name: go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          test -z "$(gofmt -l src tools)"
+          go vet ./src/... ./tools/...
+          go test ./src/... ./tools/...
+      - name: cross-compile mipsle softfloat
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: mipsle
+          GOMIPS: softfloat
+        run: |
+          mkdir -p out/bin
+          go build -ldflags "-s -w -X main.version=$(cat VERSION | tr -d '\r')" -o out/bin/blacktempled ./src/cmd/blacktempled
+          go build -o out/bin/elfcheck ./tools/elfcheck
+          go build -o out/bin/ipkpack ./tools/ipkpack
+          ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled
+      - name: ipk
+        run: |
+          mkdir -p out/rootfs/opt/blacktemple-kn/bin out/rootfs/opt/etc/init.d out/control
+          cp out/bin/blacktempled out/rootfs/opt/blacktemple-kn/bin/blacktempled
+          cp packaging/init/S99blacktemple-kn out/rootfs/opt/etc/init.d/S99blacktemple-kn
+          cp packaging/control/* out/control/
+          ./out/bin/ipkpack -data out/rootfs -control out/control -out out/blacktemple-kn_ci_mipsel-3.4_kn.ipk -epoch 0

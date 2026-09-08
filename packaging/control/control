@@ -1,0 +1,9 @@
+Package: blacktemple-kn
+Version: 0.1.0-dev
+Depends: 
+Section: net
+Architecture: mipsel-3.4_kn
+Priority: optional
+Maintainer: BlackTemple KN contributors
+Description: BlackTemple KN hello-service for Keenetic Entware (MIPSLE softfloat)
+Source: https://github.com/igorpooh1978/blacktemple_kn

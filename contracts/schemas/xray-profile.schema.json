@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blacktemple-kn.local/schemas/xray-profile.schema.json",
+  "title": "XrayProfileModel",
+  "description": "Internal profile model. Not user-edited JSON. Generator input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "protocol"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "protocol": {
+      "enum": ["vless", "vmess", "trojan", "shadowsocks", "socks", "wireguard", "hysteria", "hysteria2", "blackkey"]
+    },
+    "server": { "type": "string" },
+    "port": { "type": "integer" },
+    "transport": {
+      "enum": ["tcp", "ws", "grpc", "xhttp", "httpupgrade", "mkcp", "quic"]
+    },
+    "security": { "enum": ["none", "tls", "reality", "xtls-vision"] },
+    "country": { "type": "string" }
+  }
+}

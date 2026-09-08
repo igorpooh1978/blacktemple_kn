@@ -1,0 +1,4 @@
+#!/bin/sh
+# Remove only our prefix rules when a later wave implements them.
+# Hello-service has no BTKN_ chains yet.
+exit 0

@@ -1,0 +1,13 @@
+# Orchestrator-owned freeze zone. Parallel agents do not edit contracts
+# without an explicit wave assignment.
+/contracts/ @igorpooh1978
+/docs/adr/ @igorpooh1978
+/docs/ai/ @igorpooh1978
+/AGENTS.md @igorpooh1978
+/agent-manifest.yml @igorpooh1978
+
+/src/ @igorpooh1978
+/web/ @igorpooh1978
+/packaging/ @igorpooh1978
+/tools/ @igorpooh1978
+/lab/ @igorpooh1978

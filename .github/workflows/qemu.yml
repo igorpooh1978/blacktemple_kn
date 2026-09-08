@@ -1,0 +1,10 @@
+name: qemu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "QEMU lab not implemented this wave. QEMU is not MT7621."

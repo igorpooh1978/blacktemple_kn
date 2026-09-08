@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blacktemple-kn.local/schemas/release-manifest.schema.json",
+  "title": "ReleaseManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "channel", "assets"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "version": { "type": "string" },
+    "channel": { "enum": ["stable", "dev"] },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "arch", "url", "sha256"],
+        "properties": {
+          "name": { "type": "string" },
+          "arch": { "enum": ["mipsel-3.4_kn", "mipsel-3.4", "mips-3.4"] },
+          "url": { "type": "string", "format": "uri" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

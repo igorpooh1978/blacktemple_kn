@@ -1,0 +1,48 @@
+schema_version: 1
+project: blacktemple_kn
+default_branch: main
+orchestration: chatgpt-main-dialog
+
+waves:
+  current: R0
+  frozen_contracts: true
+  next_recommended: R3-complete-then-R4-parallel
+
+ownership:
+  A_go_runtime:
+    paths: [src/cmd/, src/internal/app/, src/internal/api/, src/internal/auth/]
+  B_keys:
+    paths: [src/internal/profiles/, src/internal/subscription/, src/internal/keys/, src/internal/countries/, src/internal/servers/]
+  C_xray:
+    paths: [src/internal/xray/, src/internal/protocols/, third_party/xray.lock.json]
+  D_routing:
+    paths: [src/internal/routing/, src/internal/dns/, src/internal/geodata/]
+  E_lists:
+    paths: [src/internal/remotelists/, src/internal/remotepolicy/]
+  F_service:
+    paths: [src/internal/supervisor/, src/internal/platform/, packaging/init/]
+  G_web:
+    paths: [web/]
+  H_build:
+    paths: [build.ps1, bootstrap.ps1, test.ps1, package.ps1, tools/, packaging/]
+  I_updater:
+    paths: [src/internal/updater/, scripts/install.sh]
+  J_lab:
+    paths: [lab/, lab.ps1]
+  K_security:
+    paths: [SECURITY.md, src/internal/auth/, .github/workflows/security.yml]
+  L_provider:
+    paths: [src/internal/provider/, src/internal/news/, src/internal/support/, src/internal/pairing/]
+  M_hardware:
+    paths: [router-smoke.ps1, docs/hardware/]
+
+rules:
+  - agents_must_not_edit_foreign_ownership
+  - agents_must_not_merge_main
+  - contract_changes_require_orchestrator
+  - no_force_push_main
+  - no_cgo
+  - xray_is_pinned_external_binary
+  - fail_open_default
+  - iptables_prefix_BTKN_
+  - ui_lan_only_by_default

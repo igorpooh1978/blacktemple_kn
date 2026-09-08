@@ -1,0 +1,56 @@
+# Local APK research — never publish
+.research-local/
+*.apk
+*.aab
+*.ipa
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets/
+credentials.json
+router-secrets.json
+
+# Build outputs
+dist/
+build/
+out/
+artifacts/
+web/dist/
+web/node_modules/
+src/cmd/blacktempled/assets/assets/
+node_modules/
+coverage/
+*.ipk
+*.sha256
+checksums.sha256
+
+# Go
+bin/
+vendor/
+*.exe
+*.test
+*.out
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and runtime
+*.log
+/logs/
+/tmp/
+.cache/
+
+# Lab / QEMU images
+lab/images/
+lab/*.qcow2
+lab/*.iso

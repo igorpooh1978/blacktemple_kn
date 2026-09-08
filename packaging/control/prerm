@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stop service if present. Do not flush foreign iptables.
+if [ -x /opt/etc/init.d/S99blacktemple-kn ]; then
+	/opt/etc/init.d/S99blacktemple-kn stop 2>/dev/null || true
+fi
+exit 0

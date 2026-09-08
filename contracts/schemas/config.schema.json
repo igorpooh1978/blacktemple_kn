@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blacktemple-kn.local/schemas/config.schema.json",
+  "title": "BlackTempleKNConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "ui", "routing", "server", "capture"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bind", "port"],
+      "properties": {
+        "bind": { "type": "string", "default": "lan" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 7480 },
+        "wanEnabled": { "type": "boolean", "default": false }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["smart", "all", "selected"] },
+        "perDevice": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lanClientRule" }
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["auto", "manual", "failover", "rotate"] },
+        "manualId": { "type": ["string", "null"] }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine"],
+      "properties": {
+        "engine": { "enum": ["unspecified", "transparent-iptables", "xray-tun"] },
+        "killSwitch": { "type": "boolean", "default": false }
+      }
+    },
+    "localProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "socksEnabled": { "type": "boolean", "default": false },
+        "httpEnabled": { "type": "boolean", "default": false },
+        "socksPort": { "type": "integer", "default": 10808 },
+        "httpPort": { "type": "integer", "default": 10809 }
+      }
+    },
+    "remoteAdminCommands": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "$defs": {
+    "lanClientRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "action"],
+      "properties": {
+        "alias": { "type": "string" },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ip": { "type": "string" },
+            "mac": { "type": "string" },
+            "hostname": { "type": "string" }
+          }
+        },
+        "action": { "enum": ["vpn", "direct"] }
+      }
+    }
+  }
+}

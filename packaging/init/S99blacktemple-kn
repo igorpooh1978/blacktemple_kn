@@ -1,0 +1,52 @@
+#!/bin/sh
+# Entware init for blacktempled. Not systemd.
+# Follows rc.func conventions when available.
+
+ENABLED=yes
+PROCS=blacktempled
+ARGS="-listen 0.0.0.0:7480"
+PREARGS=""
+DESC=$PROCS
+PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+BIN=/opt/blacktemple-kn/bin/blacktempled
+
+if [ -f /opt/etc/init.d/rc.func ]; then
+	. /opt/etc/init.d/rc.func
+	exit $?
+fi
+
+start() {
+	if [ ! -x "$BIN" ]; then
+		echo "missing $BIN"
+		return 1
+	fi
+	"$BIN" $ARGS >/opt/blacktemple-kn/logs/blacktempled.log 2>&1 &
+	echo $! >/opt/blacktemple-kn/run/blacktempled.pid
+}
+
+stop() {
+	if [ -f /opt/blacktemple-kn/run/blacktempled.pid ]; then
+		kill "$(cat /opt/blacktemple-kn/run/blacktempled.pid)" 2>/dev/null
+		rm -f /opt/blacktemple-kn/run/blacktempled.pid
+	fi
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; start ;;
+	reload) stop; start ;;
+	status)
+		if [ -f /opt/blacktemple-kn/run/blacktempled.pid ] && kill -0 "$(cat /opt/blacktemple-kn/run/blacktempled.pid)" 2>/dev/null; then
+			echo "running"
+		else
+			echo "stopped"
+			exit 1
+		fi
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|reload|status}"
+		exit 1
+		;;
+esac
