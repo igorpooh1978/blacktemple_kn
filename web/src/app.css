@@ -13,6 +13,11 @@ body {
 }
 h1 {
   font-size: 1.35rem;
+  margin: 0 0 0.5rem;
+}
+.lead,
+.status {
+  margin: 0 0 1rem;
 }
 .dot {
   display: inline-block;
@@ -21,6 +26,34 @@ h1 {
   border-radius: 50%;
   background: #888;
   margin-right: 0.4rem;
+  vertical-align: middle;
+}
+.dot-wait {
+  background: #c9a227;
+}
+.dot-on {
+  background: #3d8;
+}
+.dot-fail {
+  background: #c44;
+}
+label {
+  display: block;
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: #bbb;
+}
+input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.35rem;
+  border: 1px solid #333;
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.75rem;
+  font: inherit;
+  color: #f3f3f3;
+  background: #1a1a1a;
 }
 button {
   width: 100%;
@@ -31,13 +64,50 @@ button {
   background: #2a2a2a;
   color: #fff;
 }
+button:disabled {
+  color: #888;
+}
+.connect {
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  background: #2f4a32;
+}
+.secondary {
+  margin-top: 0.5rem;
+  background: #242424;
+}
+.linkbtn {
+  width: auto;
+  padding: 0;
+  background: none;
+  color: #9ab;
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
 .facts {
   list-style: none;
   padding: 0;
+  margin: 0 0 1rem;
 }
 .facts li {
   display: flex;
   justify-content: space-between;
+  gap: 1rem;
   padding: 0.45rem 0;
   border-bottom: 1px solid #2a2a2a;
+}
+.error {
+  color: #e88;
+}
+.notice {
+  color: #c9a227;
+}
+.aux {
+  margin-top: 1rem;
+  text-align: center;
+}
+.keyform {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #2a2a2a;
 }

@@ -9,6 +9,12 @@ export default defineConfig({
     emptyOutDir: true,
     assetsInlineLimit: 4096,
   },
+  server: {
+    proxy: {
+      "/api": { target: "http://127.0.0.1:7480", changeOrigin: true },
+      "/health": { target: "http://127.0.0.1:7480", changeOrigin: true },
+    },
+  },
   test: {
     environment: "node",
   },
