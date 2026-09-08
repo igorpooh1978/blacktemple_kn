@@ -1,0 +1,7 @@
+.cache/
+*.qcow2
+*.elf
+*.img
+*.img.gz
+last-smoke.json
+keys/

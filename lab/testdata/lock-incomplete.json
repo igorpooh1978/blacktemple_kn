@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "openwrt-malta-le",
+  "version": "24.10.8",
+  "target": "malta/le",
+  "machine": "malta",
+  "architecture": "mipsel",
+  "endian": "little",
+  "cpu": "24Kc",
+  "downloadDate": "2026-09-08",
+  "pinnedNotLatest": true,
+  "kernel": {
+    "filename": "openwrt-24.10.8-malta-le-vmlinux-initramfs.elf",
+    "url": "https://downloads.openwrt.org/releases/24.10.8/targets/malta/le/openwrt-24.10.8-malta-le-vmlinux-initramfs.elf",
+    "sha256": ""
+  }
+}

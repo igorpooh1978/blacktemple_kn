@@ -1,10 +1,83 @@
+# QEMU Malta MIPSLE lab (experimental, not KN-1011)
+
+# This workflow is an experimental MIPSLE integration gate on QEMU Malta.
+# It is not an MT7621 emulator and must not be treated as Keenetic KN-1011 PASS.
+# Failing qemu tests fail the job. There is no silent skip / continue-on-error.
+# Do not download GPL geodata here.
+
 name: qemu
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    paths:
+      - "lab/**"
+      - "lab.ps1"
+      - ".github/workflows/qemu.yml"
+      - "src/cmd/blacktempled/**"
+      - "third_party/xray.lock.json"
+
+concurrency:
+  group: qemu-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  placeholder:
+  mipsle-lab:
+    name: qemu-malta-mipsel (experimental)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
     steps:
-      - run: echo "QEMU lab not implemented this wave. QEMU is not MT7621."
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: install qemu-system-mipsel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-mips qemu-utils openssh-client
+          command -v qemu-system-mipsel
+          qemu-system-mipsel --version | head -n 1
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/qemu
+            .cache/xray
+          key: qemu-lab-${{ hashFiles('lab/openwrt.lock.json', 'third_party/xray.lock.json') }}
+
+      - name: unit tests (no live guest required)
+        run: go test ./lab/...
+
+      - name: host tools
+        run: |
+          mkdir -p out/bin out/xray
+          go build -o out/bin/elfcheck ./tools/elfcheck
+          go build -o out/bin/xrayfetch ./tools/xrayfetch
+
+      - name: mipsle artifacts
+        env:
+          GOOS: linux
+          GOARCH: mipsle
+          GOMIPS: softfloat
+        run: |
+          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled-mipsle ./src/cmd/blacktempled
+
+      - name: restore host go env for fetch/elf
+        run: |
+          unset GOOS GOARCH GOMIPS
+          ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled-mipsle
+          ./out/bin/xrayfetch -lock third_party/xray.lock.json -target linux-mipsle-softfloat -cache .cache/xray -out out/xray/xray
+          ./out/bin/elfcheck -class 32 -endian le -machine mips out/xray/xray
+
+      - name: live smoke (experimental)
+        run: |
+          go run ./lab/cmd/qemulab -action smoke -root "$PWD" \
+            -daemon out/bin/blacktempled-mipsle \
+            -xray out/xray/xray \
+            -config lab/testdata/xray-lab.json
+        # No geodata download. Optional --geodata is omitted on purpose.

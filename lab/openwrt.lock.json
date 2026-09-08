@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "openwrt-malta-le",
+  "version": "24.10.8",
+  "target": "malta/le",
+  "machine": "malta",
+  "architecture": "mipsel",
+  "endian": "little",
+  "cpu": "24Kc",
+  "memoryMiB": 256,
+  "downloadDate": "2026-09-08",
+  "upstreamIndex": "https://downloads.openwrt.org/releases/24.10.8/targets/malta/le/",
+  "sha256sumsUrl": "https://downloads.openwrt.org/releases/24.10.8/targets/malta/le/sha256sums",
+  "notHardware": "QEMU Malta mipsel (little-endian) is an integration lab, not Keenetic KN-1011, not MediaTek MT7621, not NDM, not hardware offload, not Keenetic firewall hooks.",
+  "experimental": true,
+  "pinnedNotLatest": true,
+  "kernel": {
+    "filename": "openwrt-24.10.8-malta-le-vmlinux-initramfs.elf",
+    "url": "https://downloads.openwrt.org/releases/24.10.8/targets/malta/le/openwrt-24.10.8-malta-le-vmlinux-initramfs.elf",
+    "sha256": "78407e58231a82de3d8b0ef0f1ae52209487548bb3fdd2e37559681b08951553"
+  },
+  "overlayBase": {
+    "filename": "openwrt-24.10.8-malta-le-rootfs-ext4.img.gz",
+    "url": "https://downloads.openwrt.org/releases/24.10.8/targets/malta/le/openwrt-24.10.8-malta-le-rootfs-ext4.img.gz",
+    "sha256": "5c43ad170e09f01a4fdc6b326d7bf267c85df1fde5e5aad31c979f483ddcd0ca"
+  },
+  "notes": "Pinned OpenWrt 24.10.8 malta/le from downloads.openwrt.org. SHA256 taken from the official sha256sums file on 2026-09-08. Boot method matches target/linux/malta/README: qemu-system-mipsel -kernel vmlinux-initramfs.elf -nographic -m 256. Do not use floating 'latest'."
+}
