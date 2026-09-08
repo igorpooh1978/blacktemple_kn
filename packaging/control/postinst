@@ -1,4 +1,6 @@
 #!/bin/sh
 mkdir -p /opt/blacktemple-kn/logs /opt/blacktemple-kn/run /opt/blacktemple-kn/config /opt/blacktemple-kn/data /opt/blacktemple-kn/backup
 chmod 0755 /opt/blacktemple-kn/bin/blacktempled 2>/dev/null || true
+chmod 0755 /opt/blacktemple-kn/bin/xray 2>/dev/null || true
+chmod 0755 /opt/etc/init.d/S99blacktemple-kn 2>/dev/null || true
 exit 0
