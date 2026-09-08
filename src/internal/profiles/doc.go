@@ -1,3 +1,2 @@
+// Package profiles imports BlackKey values into Profile + Subscription + Key + Server.
 package profiles
-
-// Profile storage and BlackKey import live here in R5.
