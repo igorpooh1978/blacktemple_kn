@@ -1,0 +1,52 @@
+wave: R4
+task: xray-engine
+agent: C
+branch: agent/r4/xray-engine
+worktree: blacktemple_kn-wt/xray-engine
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Xray config-generator and protocol types as a Go library. Xray stays a
+  pinned external binary. Do not claim protocol SUPPORTED.
+
+allowed_paths:
+  - src/internal/xray/
+  - src/internal/protocols/
+  - third_party/xray.lock.json
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - tools/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/auth/
+  - src/internal/profiles/
+  - src/internal/keys/
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-003, third_party/xray.lock.json pin v26.3.27
+  - other_r4_agents: none (do not wait for F supervisor merge)
+
+acceptance_criteria:
+  - Xray is not imported as a Go library. Generator writes conceptual run/xray.json content; user-facing JSON editor is out of scope.
+  - Pin remains Xray-core v26.3.27. KN-1011 binary from zip is xray_softfloat, not hardfloat xray. Do not auto-follow latest.
+  - hardwareVerification.qemu and kn-1011 stay NOT RUN unless this agent actually ran them (do not invent PASS).
+  - Protocol helpers may detect/structure outbound fields from opaque input, but status is not SUPPORTED without hardware PASS.
+  - CGO_ENABLED=0. No new go.mod dependencies. Unit tests for generator validation/failure without spawning xray if binary is absent.
+  - Do not download Xray into IPK (H owns packaging except init). Do not merge main.
+
+do_not:
+  - change lock version/URL/SHA without orchestrator gap
+  - own process state machine (F supervisor)
+  - add Go modules or CGO
+  - mark protocol SUPPORTED

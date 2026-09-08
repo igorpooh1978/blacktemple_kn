@@ -1,0 +1,56 @@
+wave: R4
+task: profiles-key
+agent: B
+branch: agent/r4/profiles-key
+worktree: blacktemple_kn-wt/profiles-key
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Library packages for profiles, BlackKey storage, subscription, countries,
+  and servers. No HTTP. No Xray process. Full key lifecycle remains R5.
+
+allowed_paths:
+  - src/internal/profiles/
+  - src/internal/subscription/
+  - src/internal/keys/
+  - src/internal/countries/
+  - src/internal/servers/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - tools/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/auth/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - src/internal/config/
+  - third_party/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: contracts/openapi/blacktemple-kn.v0.yaml (ImportKeyRequest, Status.key, redacted profiles)
+  - other_r4_agents: none (library only; A will import after orchestrator merge)
+
+acceptance_criteria:
+  - Packages export types/functions A can call later for Status.key enum missing|active|invalid and redacted profile lists (id/name/status only; never full BlackKey).
+  - Import/store API accepts opaque BlackKey string; do not parse Xray JSON or protocol fields (that is C).
+  - Secrets never logged or returned in full. Atomic JSON writes if persisting files (ADR-005).
+  - Empty store reports key missing. Invalid/empty import is an error, not a panic.
+  - Countries/servers may be stubs (empty lists / auto mode) with tests; do not invent live provider APIs.
+  - CGO_ENABLED=0. No new go.mod dependencies. go test for owned packages. Do not merge main.
+
+do_not:
+  - register HTTP routes (A owns api)
+  - generate xray.json (C) or supervise processes (F)
+  - commit real BlackKey samples
+  - add Go modules

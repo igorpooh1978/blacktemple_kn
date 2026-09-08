@@ -1,0 +1,45 @@
+wave: R4
+task: web-ui
+agent: G
+branch: agent/r4/web-ui
+worktree: blacktemple_kn-wt/web-ui
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Minimal Russian Preact UI against frozen OpenAPI. Main screen is
+  Connect/Disconnect, not Xray JSON. Embed into the daemon happens via H build copy.
+
+allowed_paths:
+  - web/
+
+forbidden_paths:
+  - src/
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - packaging/
+  - tools/
+  - build.ps1
+  - src/cmd/blacktempled/assets/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: contracts/openapi/blacktemple-kn.v0.yaml, ADR-006
+  - other_r4_agents: none (UI can mock/fetch; A implements real auth after merge)
+
+acceptance_criteria:
+  - UI language Russian. Primary control is connect/disconnect; no Xray JSON editor.
+  - Reads GET /api/v1/status (and health/version as needed). Maps connection/routing/serverMode/key/geodata without showing secrets.
+  - First-run setup and login against POST /api/v1/auth/setup and /login; credentials never rendered back from API.
+  - Connect button may call POST /api/v1/connection; 501 must be handled as unavailable, not a crash.
+  - Stack: Preact + TypeScript + Vite + plain CSS. Forbidden: React/Angular/Vue/Quasar/MUI/Bootstrap/Tailwind runtime/Rive/Lottie/custom font packs.
+  - gzip(HTML+JS+CSS) ≤ 250 KB via existing web size gate. Vitest updated for new UI behavior.
+  - Do not write src/cmd/blacktempled/assets (H copies dist during build.ps1). Do not merge main.
+
+do_not:
+  - add UI kits or font packs
+  - display BlackKey or tokens
+  - edit Go, packaging, or contracts
+  - claim VPN connected without API evidence

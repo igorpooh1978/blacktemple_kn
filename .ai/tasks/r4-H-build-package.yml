@@ -1,0 +1,49 @@
+wave: R4
+task: build-package
+agent: H
+branch: agent/r4/build-package
+worktree: blacktemple_kn-wt/build-package
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Windows IPK/ELF pipeline and packaging/control scripts. packaging/init/**
+  is F, not H. Keep CGO_ENABLED=0 and MIPSLE softfloat.
+
+allowed_paths:
+  - build.ps1
+  - bootstrap.ps1
+  - test.ps1
+  - package.ps1
+  - tools/
+  - packaging/control/
+  - packaging/AGENTS.md
+
+forbidden_paths:
+  - packaging/init/
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - src/
+  - third_party/xray.lock.json
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-002, ADR-008
+  - other_r4_agents: none (pipeline must still build BASE_SHA hello-service)
+
+acceptance_criteria:
+  - packaging/init/** is not modified (F owns S99blacktemple-kn).
+  - IPK control scripts remain Entware (postinst/prerm/postrm/control); uninstall removes only BTKN_ rules and /opt/blacktemple-kn; do not touch /opt/bin/xray.
+  - build.ps1/package.ps1/test.ps1 still produce linux/mipsle softfloat static ELF and IPK; tools/elfcheck and tools/ipkpack stay the packers.
+  - Existing copy of web/dist → src/cmd/blacktempled/assets may remain in build.ps1; do not rewrite G sources or A runtime packages.
+  - CGO_ENABLED=0. No new go.mod dependencies. Xray zip inclusion stays opt-in (IncludeXray); do not mark Xray hardware-supported.
+  - Record real ELF/IPK commands and sizes in handoff; do not invent checksums. Do not merge main.
+
+do_not:
+  - edit packaging/init/**
+  - add Go modules
+  - require WSL/Docker/OpenWrt SDK
+  - force-push or merge

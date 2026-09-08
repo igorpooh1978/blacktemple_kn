@@ -16,7 +16,7 @@
 ├── docs/         ai, adr, hardware, research, releases, architecture
 ├── src/          Go daemon (blacktempled)
 ├── web/          Preact/Vite UI → go:embed dist
-├── packaging/    Entware control/init/rootfs templates
+├── packaging/    Entware templates; init/ = stream F, control/ = stream H
 ├── tools/        elfcheck, ipkpack
 ├── scripts/      install.sh and helpers
 ├── lab/          QEMU notes (not hardware)

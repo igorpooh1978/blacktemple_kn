@@ -1,0 +1,66 @@
+wave: R4
+task: runtime-auth
+agent: A
+branch: agent/r4/runtime-auth
+worktree: blacktemple_kn-wt/runtime-auth
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Minimal blacktempled composition root, frozen OpenAPI HTTP surface, and
+  first-run/session auth. Keep LAN bind. Do not implement VPN connect.
+
+allowed_paths:
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/auth/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - tools/
+  - build.ps1
+  - bootstrap.ps1
+  - test.ps1
+  - package.ps1
+  - src/internal/profiles/
+  - src/internal/subscription/
+  - src/internal/keys/
+  - src/internal/countries/
+  - src/internal/servers/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - src/internal/routing/
+  - src/internal/dns/
+  - src/internal/geodata/
+  - src/internal/config/
+  - third_party/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: contracts/openapi/blacktemple-kn.v0.yaml
+  - other_r4_agents: none (start from BASE_SHA; do not wait for merge)
+
+acceptance_criteria:
+  - HTTP handlers live under src/internal/api; composition root under src/internal/app; auth under src/internal/auth.
+  - GET /health, GET /api/v1/version, GET /api/v1/status match frozen OpenAPI schemas (Status.xray may stay STOPPED / pid null until F/C merge).
+  - POST /api/v1/auth/setup, /login, /logout implemented (not 501). Setup returns 409 if already initialized. Password stored as hash, never plaintext, never logged, never returned.
+  - Session cookie on successful login; logout clears session. State-changing methods are POST.
+  - Default listen remains LAN-oriented; do not bind 0.0.0.0 unless already required by existing init ARGS (do not edit packaging/init).
+  - POST /api/v1/connection and profile import may remain 501; do not invent extra routes.
+  - CGO_ENABLED=0. No new go.mod dependencies. go:embed of src/cmd/blacktempled/assets remains.
+  - Unit tests cover setup/login/logout happy path, 409, 401. Do not merge main. Push only agent/r4/runtime-auth.
+
+do_not:
+  - merge any branch or edit foreign ownership
+  - add Go modules
+  - parse BlackKey or spawn Xray
+  - mark protocols SUPPORTED
+  - copy web/dist into assets (H build pipeline owns that copy)

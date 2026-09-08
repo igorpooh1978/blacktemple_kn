@@ -1,0 +1,57 @@
+wave: R4
+task: service-supervisor
+agent: F
+branch: agent/r4/service-supervisor
+worktree: blacktemple_kn-wt/service-supervisor
+base_sha: 41099b953e8318d2c6115e04521a2f9821627378
+merge_authorized: false
+
+goal: >
+  Entware init for blacktempled and in-process Xray child supervisor states.
+  packaging/init/** only inside packaging/. Not systemd. Not IPK control scripts.
+
+allowed_paths:
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - packaging/init/
+
+forbidden_paths:
+  - packaging/control/
+  - packaging/AGENTS.md
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - tools/
+  - build.ps1
+  - bootstrap.ps1
+  - test.ps1
+  - package.ps1
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - third_party/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-004, OpenAPI XrayProcess.state
+  - other_r4_agents: none (C generates config; F supervises a binary path)
+
+acceptance_criteria:
+  - Supervisor states exactly STOPPED STARTING RUNNING RELOADING FAILED BACKOFF (OpenAPI XrayProcess).
+  - Default crash policy FAIL OPEN (documented in code comments; do not install kill switch as default).
+  - packaging/init/S99blacktemple-kn remains Entware rc.func/init.d, not systemd. Commands start|stop|restart|reload|status.
+  - Distinguish restart-vpn (Xray child only) vs restart-manager vs full-restart in supervisor API names (ADR-004); do not implement HTTP (A).
+  - Coexistence notes stay: own PID/paths under /opt/blacktemple-kn; do not touch /opt/bin/xray.
+  - platform/entware and platform/keenetic adapters only; no systemd unit files.
+  - CGO_ENABLED=0. No new go.mod dependencies. Tests for state transitions without requiring a real xray binary.
+  - Do not edit packaging/control/** (H). Do not merge main.
+
+do_not:
+  - iptables -F or non-BTKN_ chains
+  - own IPK control/postinst (H)
+  - spawn network capture (D / ADR-009 later)
+  - add Go modules
