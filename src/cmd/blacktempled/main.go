@@ -1,112 +1,48 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"runtime"
-	"strings"
 	"time"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/app"
 )
 
 var version = "0.1.0-dev"
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:7480", "HTTP listen address (LAN only in production)")
+	listen := flag.String("listen", "127.0.0.1:7480", "HTTP listen address (host used in explicit mode; port used in all modes)")
+	listenMode := flag.String("listen-mode", "loopback", "listen mode: loopback | auto-lan | explicit")
+	dataDir := flag.String("data-dir", "data", "local data directory for auth hash and runtime files")
 	flag.Parse()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/api/v1/version", handleVersion)
-	mux.HandleFunc("/api/v1/status", handleStatus)
-	mux.HandleFunc("/api/v1/connection", handleNotImplemented)
-	mux.HandleFunc("/api/v1/profiles", handleNotImplemented)
-	mux.HandleFunc("/api/v1/auth/setup", handleNotImplemented)
-	mux.HandleFunc("/api/v1/auth/login", handleNotImplemented)
-	mux.HandleFunc("/api/v1/auth/logout", handleNotImplemented)
-	mux.Handle("/", http.FileServer(http.FS(uiFS())))
-
-	srv := &http.Server{
-		Addr:              *listen,
-		Handler:           withSecurityHeaders(mux),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	ln, err := net.Listen("tcp", *listen)
+	a, err := app.New(app.Config{
+		Listen:     *listen,
+		ListenMode: *listenMode,
+		DataDir:    *dataDir,
+		Version:    version,
+		UI:         uiFS(),
+		// Connection and Profiles stay nil until later waves (HTTP 501).
+		// LAN resolver stays nil until platform wiring (auto-lan → loopback).
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("blacktempled %s listening on %s goos=%s goarch=%s cgo=%s", version, ln.Addr(), runtime.GOOS, runtime.GOARCH, cgoValue())
+
+	srv := &http.Server{
+		Addr:              a.Addr(),
+		Handler:           a.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	ln, err := net.Listen("tcp", a.Addr())
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("blacktempled %s listening on %s", version, ln.Addr())
 	log.Fatal(srv.Serve(ln))
-}
-
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func handleVersion(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"version": version,
-		"goos":    runtime.GOOS,
-		"goarch":  runtime.GOARCH,
-		"gomips":  os.Getenv("GOMIPS"),
-		"cgo":     cgoValue(),
-	})
-}
-
-func handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"connection": "disconnected",
-		"country":    "",
-		"latencyMs":  nil,
-		"routing":    "smart",
-		"serverMode": "auto",
-		"key":        "missing",
-		"geodata":    "missing",
-		"xray": map[string]any{
-			"state":        "STOPPED",
-			"pid":          nil,
-			"version":      "",
-			"restartCount": 0,
-		},
-	})
-}
-
-func handleNotImplemented(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not implemented in hello-service",
-	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func withSecurityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func uiFS() fs.FS {
@@ -115,11 +51,4 @@ func uiFS() fs.FS {
 		panic(err)
 	}
 	return sub
-}
-
-func cgoValue() string {
-	if strings.TrimSpace(os.Getenv("CGO_ENABLED")) == "1" {
-		return "1"
-	}
-	return "0"
 }

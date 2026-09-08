@@ -1,3 +1,3 @@
 package app
 
-// Package app will become the daemon composition root in R4+.
+// Package app is the daemon composition root: listen bind, auth store, and API mux.
