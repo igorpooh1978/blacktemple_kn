@@ -75,6 +75,8 @@ func (s *SerialSession) SendLine(line string) error {
 }
 
 // LoginRoot waits for the OpenWrt console and logs in as root.
+// OpenWrt's ash console prints "Please press Enter to activate this console"
+// and does not show "login:" until a newline is sent.
 func (s *SerialSession) LoginRoot(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	remain := func() time.Duration {
@@ -84,19 +86,31 @@ func (s *SerialSession) LoginRoot(timeout time.Duration) error {
 		}
 		return r
 	}
-	_, err := s.WaitFor("login:", remain())
-	if err != nil {
-		// First boot often wants Enter before login.
-		_ = s.SendLine("")
-		_, err = s.WaitFor("login:", remain())
-		if err != nil {
-			return fmt.Errorf("boot console: %w", err)
+	for time.Now().Before(deadline) {
+		chunk := 2 * time.Second
+		if r := time.Until(deadline); r < chunk {
+			if r <= 0 {
+				break
+			}
+			chunk = r
 		}
+		got, err := s.WaitFor("login:", chunk)
+		if err == nil && strings.Contains(got, "login:") {
+			break
+		}
+		_ = s.SendLine("")
+	}
+	if !strings.Contains(s.buf.String(), "login:") {
+		snippet := s.buf.String()
+		if len(snippet) > 1200 {
+			snippet = snippet[len(snippet)-1200:]
+		}
+		return fmt.Errorf("boot console: serial timeout waiting for %q; last output: %q", "login:", snippet)
 	}
 	if err := s.SendLine("root"); err != nil {
 		return err
 	}
-	_, err = s.WaitFor("#", remain())
+	_, err := s.WaitFor("#", remain())
 	return err
 }
 

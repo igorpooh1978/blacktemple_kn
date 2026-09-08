@@ -214,7 +214,7 @@ func Smoke(cfg LabConfig) Result {
 		HealthPort:   healthPort,
 		SerialPort:   serialPort,
 	}
-	qa, err := BuildQEMUArgs(cfg.QEMUPath, kernel, overlay, lock, plan)
+	qa, err := BuildQEMUArgs(cfg.QEMUPath, kernel, "", lock, plan)
 	if err != nil {
 		return failPrep(lock, ExitSetup, err.Error())
 	}
@@ -222,6 +222,9 @@ func Smoke(cfg LabConfig) Result {
 		return failPrep(lock, ExitSetup, "qemu args contain tap/bridge")
 	}
 	cfg.logf("launch: %s %s", qa.Path, strings.Join(qa.Args, " "))
+	if overlay != "" {
+		cfg.logf("overlay prepared but not attached (initramfs kernel boot): %s", overlay)
+	}
 	cmd := exec.Command(qa.Path, qa.Args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

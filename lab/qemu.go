@@ -145,6 +145,7 @@ func BuildQEMUArgs(qemuPath, kernelPath, overlayQcow string, lock *Lock, net Net
 		"-monitor", "none",
 		"-no-reboot",
 		"-kernel", kernelPath,
+		"-append", "console=ttyS0,115200n8",
 		"-serial", fmt.Sprintf("tcp:127.0.0.1:%d,server,nowait", net.SerialPort),
 		"-netdev", lanNetdev,
 		"-device", "pcnet,id=devlan,netdev=lan",

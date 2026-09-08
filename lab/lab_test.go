@@ -155,6 +155,9 @@ func TestQEMUArgsIsolated(t *testing.T) {
 	if !strings.Contains(joined, "id=wan") {
 		t.Fatal("WAN user NAT missing")
 	}
+	if !strings.Contains(joined, "console=ttyS0") {
+		t.Fatal("kernel console must be ttyS0")
+	}
 }
 
 func TestBootTimeout(t *testing.T) {
