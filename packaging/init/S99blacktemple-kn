@@ -1,49 +1,110 @@
 #!/bin/sh
 # Entware init for blacktempled. Not systemd.
-# Follows rc.func conventions when available.
+# If /opt/etc/init.d/rc.func exists it handles start/stop/restart.
+# Fallback implements start/stop/restart/status/reload without it.
 
 ENABLED=yes
 PROCS=blacktempled
-ARGS="-listen 0.0.0.0:7480"
+# FAIL CLOSED: loopback only. LAN bind is a later daemon flag, not all-interfaces.
+ARGS="-listen 127.0.0.1:7480"
 PREARGS=""
-DESC=$PROCS
-PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+DESC="blacktemple-kn"
+PREFIX=/opt/blacktemple-kn
+BIN=$PREFIX/bin/blacktempled
+PIDFILE=$PREFIX/run/blacktempled.pid
+LOGFILE=$PREFIX/logs/blacktempled.log
+PATH=$PREFIX/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-BIN=/opt/blacktemple-kn/bin/blacktempled
+mkdir -p "$PREFIX/run" "$PREFIX/logs" 2>/dev/null || true
 
-if [ -f /opt/etc/init.d/rc.func ]; then
-	. /opt/etc/init.d/rc.func
-	exit $?
-fi
+cmd=$1
 
-start() {
+case "$cmd" in
+	start|stop|restart)
+		if [ -r /opt/etc/init.d/rc.func ]; then
+			. /opt/etc/init.d/rc.func
+			exit $?
+		fi
+		;;
+esac
+
+is_running() {
+	if [ ! -f "$PIDFILE" ]; then
+		return 1
+	fi
+	pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
+	if [ -z "$pid" ]; then
+		return 1
+	fi
+	kill -0 "$pid" 2>/dev/null
+}
+
+do_start() {
 	if [ ! -x "$BIN" ]; then
 		echo "missing $BIN"
 		return 1
 	fi
-	"$BIN" $ARGS >/opt/blacktemple-kn/logs/blacktempled.log 2>&1 &
-	echo $! >/opt/blacktemple-kn/run/blacktempled.pid
+	if is_running; then
+		echo "already running"
+		return 0
+	fi
+	rm -f "$PIDFILE"
+	"$BIN" $ARGS >>"$LOGFILE" 2>&1 &
+	echo $! >"$PIDFILE"
 }
 
-stop() {
-	if [ -f /opt/blacktemple-kn/run/blacktempled.pid ]; then
-		kill "$(cat /opt/blacktemple-kn/run/blacktempled.pid)" 2>/dev/null
-		rm -f /opt/blacktemple-kn/run/blacktempled.pid
+do_stop() {
+	if [ ! -f "$PIDFILE" ]; then
+		return 0
+	fi
+	pid=$(cat "$PIDFILE" 2>/dev/null) || true
+	rm -f "$PIDFILE"
+	if [ -z "$pid" ]; then
+		return 0
+	fi
+	if ! kill -0 "$pid" 2>/dev/null; then
+		return 0
+	fi
+	kill "$pid" 2>/dev/null || true
+	n=0
+	while [ "$n" -lt 8 ] && kill -0 "$pid" 2>/dev/null; do
+		sleep 1
+		n=$((n + 1))
+	done
+	if kill -0 "$pid" 2>/dev/null; then
+		kill -9 "$pid" 2>/dev/null || true
 	fi
 }
 
-case "$1" in
-	start) start ;;
-	stop) stop ;;
-	restart) stop; start ;;
-	reload) stop; start ;;
+do_status() {
+	if is_running; then
+		echo "running"
+		return 0
+	fi
+	echo "stopped"
+	return 1
+}
+
+do_restart() {
+	do_stop
+	do_start
+}
+
+case "$cmd" in
+	start)
+		do_start
+		;;
+	stop)
+		do_stop
+		;;
+	restart)
+		do_restart
+		;;
+	reload)
+		do_restart
+		;;
 	status)
-		if [ -f /opt/blacktemple-kn/run/blacktempled.pid ] && kill -0 "$(cat /opt/blacktemple-kn/run/blacktempled.pid)" 2>/dev/null; then
-			echo "running"
-		else
-			echo "stopped"
-			exit 1
-		fi
+		do_status
 		;;
 	*)
 		echo "Usage: $0 {start|stop|restart|reload|status}"

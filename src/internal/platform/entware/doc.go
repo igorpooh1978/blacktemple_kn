@@ -1,3 +1,3 @@
-package platform
+package entware
 
-// Package platform holds Entware/Keenetic adapters. No systemd.
+// Entware service script: packaging/init/S99blacktemple-kn (not systemd).
