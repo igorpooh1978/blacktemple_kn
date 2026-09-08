@@ -7,6 +7,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    assetsDir: ".",
     assetsInlineLimit: 4096,
   },
   server: {

@@ -10,7 +10,7 @@
     "qemu": "NOT RUN",
     "kn-1011": "NOT RUN"
   },
-  "notes": "P0 pin candidate v26.7.28 (GitHub prerelease, not latest). SHA256 taken from GitHub release asset digest, matching official .dgst SHA2-256, and matching SHA256 of the downloaded zip. Xray-linux-mips32le.zip contains xray_softfloat; ELF32 little-endian MIPS ET_EXEC static (elfcheck PASS). Xray-linux-mips32.zip also pinned. MIPS binaries were not executed on Windows. hardwareVerification.kn-1011 stays NOT RUN. Orchestrator-provided note only (not this wave's hardware run): OBSERVED_WORKING_BASELINE on KN-1011 mipsle for v26.7.28. From official zip use xray_softfloat for KN-1011. Android APK string showed Xray-Core v 26.2.6; router pin is independent. Do not auto-follow latest.",
+  "notes": "P0 CANDIDATE v26.7.28 (GitHub prerelease, not latest, not stable hardware verified). SHA256 taken from GitHub release asset digest. MIPS targets ship in Entware IPK as /opt/blacktemple-kn/bin/xray (xray_softfloat). windows-amd64-test and linux-amd64-test are host CI/integration only and are NOT included in IPK. hardwareVerification.qemu and kn-1011 stay NOT RUN until an automated hardware gate runs. Orchestrator-provided note only (not this wave's hardware run): OBSERVED_WORKING_BASELINE on KN-1011 mipsle for v26.7.28. Android APK string showed Xray-Core v 26.2.6; router pin is independent. Do not auto-follow latest. Do not revert to v26.3.27.",
   "targets": {
     "linux-mipsle-softfloat": {
       "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-mips32le.zip",
@@ -23,6 +23,18 @@
       "zipSha256": "aec600118fd1e7ee42e8d5e8d5c82cc5e8139e82ff1da029e9b81b7170fc028c",
       "binaryInZip": "xray_softfloat",
       "ipkArch": "mips-3.4"
+    },
+    "windows-amd64-test": {
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-windows-64.zip",
+      "zipSha256": "c7172078fca4711bcd92a4774dcd1822544579c58816197575c47533317fd8d1",
+      "binaryInZip": "xray.exe",
+      "ipkArch": ""
+    },
+    "linux-amd64-test": {
+      "zipUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip",
+      "zipSha256": "8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40",
+      "binaryInZip": "xray",
+      "ipkArch": ""
     }
   },
   "stableAutoUpdate": false

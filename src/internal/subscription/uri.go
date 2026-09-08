@@ -37,6 +37,7 @@ func parseVLESS(raw string) (ParsedShare, error) {
 		CountryHint: hint,
 		StableID:    stableID("vless", u.Hostname(), port, transport, security, remark),
 		FieldNames:  fields,
+		Params:      paramsFromQuery(q),
 		secret:      secret(id),
 	}, nil
 }
@@ -73,6 +74,7 @@ func parseTrojan(raw string) (ParsedShare, error) {
 		CountryHint: hint,
 		StableID:    stableID("trojan", u.Hostname(), port, transport, security, remark),
 		FieldNames:  fields,
+		Params:      paramsFromQuery(q),
 		secret:      secret(password),
 	}, nil
 }
@@ -131,6 +133,7 @@ func parseVMessURI(raw string) (ParsedShare, error) {
 		CountryHint: hint,
 		StableID:    stableID("vmess", u.Hostname(), port, transport, security, remark),
 		FieldNames:  fields,
+		Params:      paramsFromQuery(q),
 		secret:      secret(id),
 	}, nil
 }
@@ -172,6 +175,13 @@ func parseVMessJSON(raw []byte, remarkOverride string) (ParsedShare, error) {
 	security := normalizeSecurity(m.TLS)
 	fields := []string{"v", "ps", "add", "port", "id", "net", "tls"}
 	hint := countryHint(remark, "")
+	params := ConnectionParams{
+		SNI:        m.SNI,
+		Host:       m.Host,
+		Path:       m.Path,
+		ALPN:       splitALPN(m.ALPN),
+		HeaderType: m.Type,
+	}
 	return ParsedShare{
 		Protocol:    "vmess",
 		Host:        m.Add,
@@ -182,6 +192,7 @@ func parseVMessJSON(raw []byte, remarkOverride string) (ParsedShare, error) {
 		CountryHint: hint,
 		StableID:    stableID("vmess", m.Add, port, transport, security, remark),
 		FieldNames:  fields,
+		Params:      params,
 		secret:      secret(m.ID),
 	}, nil
 }
@@ -294,6 +305,42 @@ func fragmentRemark(u *url.URL) string {
 		return u.Fragment
 	}
 	return strings.TrimSpace(s)
+}
+
+func paramsFromQuery(q url.Values) ConnectionParams {
+	return ConnectionParams{
+		Flow:             q.Get("flow"),
+		SNI:              q.Get("sni"),
+		Host:             q.Get("host"),
+		Path:             q.Get("path"),
+		ServiceName:      q.Get("serviceName"),
+		Mode:             q.Get("mode"),
+		ALPN:             splitALPN(q.Get("alpn")),
+		Fingerprint:      q.Get("fp"),
+		RealityPublicKey: q.Get("pbk"),
+		ShortID:          q.Get("sid"),
+		SpiderX:          q.Get("spx"),
+		HeaderType:       q.Get("headerType"),
+	}
+}
+
+func splitALPN(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func queryFieldNames(q url.Values, names ...string) []string {

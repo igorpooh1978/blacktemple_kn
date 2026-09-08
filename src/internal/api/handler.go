@@ -63,8 +63,9 @@ type XrayProcess struct {
 
 // Profile is a redacted profile list item. Never includes a BlackKey.
 type Profile struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // VersionInfo is filled by the composition root.
@@ -260,7 +261,7 @@ func (s *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.connection.Control(r.Context(), body.Op); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "control failed"})
+		writePublicError(w, err, http.StatusInternalServerError, "control failed")
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -307,7 +308,7 @@ func (s *Server) handleImportProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := s.profiles.Import(r.Context(), body.BlackKey, body.Name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "import failed"})
+		writePublicError(w, err, http.StatusInternalServerError, "import failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
@@ -357,6 +358,24 @@ func decodeJSON(r *http.Request, max int64, dst any) error {
 		return errors.New("extra json")
 	}
 	return nil
+}
+
+type publicHTTPError interface {
+	HTTPStatus() int
+	PublicMessage() string
+}
+
+func writePublicError(w http.ResponseWriter, err error, fallback int, fallbackMsg string) {
+	var pe publicHTTPError
+	if errors.As(err, &pe) && pe.HTTPStatus() > 0 {
+		msg := pe.PublicMessage()
+		if msg == "" {
+			msg = fallbackMsg
+		}
+		writeJSON(w, pe.HTTPStatus(), map[string]string{"error": msg})
+		return
+	}
+	writeJSON(w, fallback, map[string]string{"error": fallbackMsg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

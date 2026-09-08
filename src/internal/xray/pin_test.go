@@ -53,4 +53,33 @@ func TestLockPinCandidate(t *testing.T) {
 	if be.ZipSHA256 != "aec600118fd1e7ee42e8d5e8d5c82cc5e8139e82ff1da029e9b81b7170fc028c" {
 		t.Fatalf("unexpected mips32 sha256 %s", be.ZipSHA256)
 	}
+	if be.BinaryInZip != "xray_softfloat" {
+		t.Fatalf("be binaryInZip=%s", be.BinaryInZip)
+	}
+	win, ok := pin.Targets["windows-amd64-test"]
+	if !ok {
+		t.Fatal("missing windows-amd64-test")
+	}
+	if !strings.Contains(win.ZipURL, "/v26.7.28/Xray-windows-64.zip") {
+		t.Fatalf("unexpected windows url %s", win.ZipURL)
+	}
+	if win.ZipSHA256 != "c7172078fca4711bcd92a4774dcd1822544579c58816197575c47533317fd8d1" {
+		t.Fatalf("unexpected windows sha256 %s", win.ZipSHA256)
+	}
+	if win.BinaryInZip != "xray.exe" {
+		t.Fatalf("windows binaryInZip=%s", win.BinaryInZip)
+	}
+	if win.IPKArch != "" {
+		t.Fatal("windows-amd64-test must not ship in IPK")
+	}
+	lin, ok := pin.Targets["linux-amd64-test"]
+	if !ok {
+		t.Fatal("missing linux-amd64-test")
+	}
+	if lin.ZipSHA256 != "8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40" {
+		t.Fatalf("unexpected linux-amd64 sha256 %s", lin.ZipSHA256)
+	}
+	if lin.IPKArch != "" {
+		t.Fatal("linux-amd64-test must not ship in IPK")
+	}
 }

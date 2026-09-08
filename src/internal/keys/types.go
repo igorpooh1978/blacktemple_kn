@@ -2,6 +2,8 @@ package keys
 
 import (
 	"time"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/subscription"
 )
 
 const redacted = "[redacted]"
@@ -23,6 +25,7 @@ type Key struct {
 	Protocol       string
 	Remark         string
 	secret         secret
+	params         subscription.ConnectionParams
 }
 
 func (k Key) String() string {
@@ -36,6 +39,24 @@ func (k Key) GoString() string { return k.String() }
 
 // Material returns the protocol secret. Do not log it.
 func (k Key) Material() string { return string(k.secret) }
+
+// Params returns copied connection material without UUID/password.
+func (k Key) Params() subscription.ConnectionParams {
+	out := k.params
+	if k.params.ALPN != nil {
+		out.ALPN = append([]string(nil), k.params.ALPN...)
+	}
+	return out
+}
+
+// WithParams attaches parser-observed connection material.
+func (k Key) WithParams(p subscription.ConnectionParams) Key {
+	k.params = p
+	if p.ALPN != nil {
+		k.params.ALPN = append([]string(nil), p.ALPN...)
+	}
+	return k
+}
 
 // New builds a Key. material is never stored in exported fields.
 func New(id, profileID, subscriptionID, serverID, protocol, remark, material string) Key {

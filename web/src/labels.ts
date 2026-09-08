@@ -58,7 +58,7 @@ export function serverLabel(v: ServerMode): string {
 export function routingLabel(v: RoutingMode): string {
   switch (v) {
     case "smart":
-      return "Умная";
+      return "Пока не включена";
     case "all":
       return "Вся";
     case "selected":

@@ -30,6 +30,6 @@ describe("Russian labels", () => {
     expect(keyLabel("missing")).toBe("Не добавлен");
     expect(keyLabel(undefined)).toBe("Не добавлен");
     expect(serverLabel("auto")).toBe("Автоматически");
-    expect(routingLabel("smart")).toBe("Умная");
+    expect(routingLabel("smart")).toBe("Пока не включена");
   });
 });

@@ -14,10 +14,12 @@ import (
 type Runner struct {
 	Executable string
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	waitCh  chan error
-	started bool
+	mu       sync.Mutex
+	cmd      *exec.Cmd
+	waitCh   chan error
+	waitOnce *sync.Once
+	waitErr  error
+	started  bool
 }
 
 // Version runs `xray version` and returns trimmed stdout/stderr.
@@ -81,6 +83,8 @@ func (r *Runner) Start(ctx context.Context, configPath string) error {
 	}()
 	r.cmd = cmd
 	r.waitCh = waitCh
+	r.waitOnce = &sync.Once{}
+	r.waitErr = nil
 	r.started = true
 	return nil
 }
@@ -89,7 +93,6 @@ func (r *Runner) Start(ctx context.Context, configPath string) error {
 func (r *Runner) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	cmd := r.cmd
-	waitCh := r.waitCh
 	started := r.started
 	r.mu.Unlock()
 	if !started || cmd == nil || cmd.Process == nil {
@@ -98,9 +101,10 @@ func (r *Runner) Stop(ctx context.Context) error {
 	if err := cmd.Process.Kill(); err != nil && !processAlreadyDone(err) {
 		return fmt.Errorf("xray stop: %w", err)
 	}
+	done := make(chan error, 1)
+	go func() { done <- r.reap() }()
 	select {
-	case <-waitCh:
-		r.clear()
+	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -109,28 +113,55 @@ func (r *Runner) Stop(ctx context.Context) error {
 
 // Wait blocks until the child exits.
 func (r *Runner) Wait(ctx context.Context) error {
-	r.mu.Lock()
-	waitCh := r.waitCh
-	started := r.started
-	r.mu.Unlock()
-	if !started || waitCh == nil {
-		return fmt.Errorf("xray not started")
-	}
+	done := make(chan error, 1)
+	go func() { done <- r.reap() }()
 	select {
-	case err := <-waitCh:
-		r.clear()
+	case err := <-done:
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (r *Runner) clear() {
+// PID returns the child PID while running, or 0.
+func (r *Runner) PID() int {
 	r.mu.Lock()
-	r.cmd = nil
-	r.waitCh = nil
-	r.started = false
+	defer r.mu.Unlock()
+	if r.cmd == nil || r.cmd.Process == nil {
+		return 0
+	}
+	return r.cmd.Process.Pid
+}
+
+// Path returns the configured executable path.
+func (r *Runner) Path() string {
+	if r == nil {
+		return ""
+	}
+	return r.Executable
+}
+
+func (r *Runner) reap() error {
+	r.mu.Lock()
+	once := r.waitOnce
+	ch := r.waitCh
+	started := r.started
 	r.mu.Unlock()
+	if !started || once == nil || ch == nil {
+		return fmt.Errorf("xray not started")
+	}
+	once.Do(func() {
+		err := <-ch
+		r.mu.Lock()
+		r.waitErr = err
+		r.cmd = nil
+		r.waitCh = nil
+		r.started = false
+		r.mu.Unlock()
+	})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.waitErr
 }
 
 func (r *Runner) requireExecutable() error {

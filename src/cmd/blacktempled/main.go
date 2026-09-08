@@ -25,7 +25,7 @@ func main() {
 		DataDir:    *dataDir,
 		Version:    version,
 		UI:         uiFS(),
-		// Connection and Profiles stay nil until later waves (HTTP 501).
+		// Connection and Profiles are wired in app.New (profiles + Xray + supervisor).
 		// LAN resolver stays nil until platform wiring (auto-lan → loopback).
 	})
 	if err != nil {

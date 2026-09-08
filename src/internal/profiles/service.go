@@ -443,7 +443,7 @@ func (s *Service) entities(profileID, subID string, entries []subscription.Parse
 			seenSrv[srv.ID] = struct{}{}
 			srvs = append(srvs, srv)
 		}
-		ks = append(ks, keys.New(e.StableID, profileID, subID, srv.ID, e.Protocol, e.Remark, e.Material()))
+		ks = append(ks, keys.New(e.StableID, profileID, subID, srv.ID, e.Protocol, e.Remark, e.Material()).WithParams(e.Params))
 	}
 	return ks, srvs
 }

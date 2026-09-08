@@ -35,6 +35,39 @@ func WithSource(s Subscription, raw string) Subscription {
 	return s
 }
 
+// ConnectionParams is the internal normalized transport/security material
+// present on a share. Parser copies only fields that were actually present.
+// Defaults belong to the Xray generator, not this layer. UUID/password stay
+// in secret, never here.
+type ConnectionParams struct {
+	Flow             string
+	SNI              string
+	Host             string
+	Path             string
+	ServiceName      string
+	Mode             string
+	ALPN             []string
+	Fingerprint      string
+	RealityPublicKey string
+	ShortID          string
+	SpiderX          string
+	HeaderType       string
+}
+
+func (p ConnectionParams) String() string {
+	return "ConnectionParams{Flow:" + p.Flow +
+		" SNI:" + p.SNI +
+		" Host:" + p.Host +
+		" Path:" + p.Path +
+		" ServiceName:" + p.ServiceName +
+		" Mode:" + p.Mode +
+		" Fingerprint:" + p.Fingerprint +
+		" ShortID:" + p.ShortID +
+		" HeaderType:" + p.HeaderType + "}"
+}
+
+func (p ConnectionParams) GoString() string { return p.String() }
+
 // ParsedShare is one classified share entry with the secret unexported.
 type ParsedShare struct {
 	Protocol    string
@@ -46,6 +79,7 @@ type ParsedShare struct {
 	CountryHint string
 	StableID    string
 	FieldNames  []string
+	Params      ConnectionParams
 	secret      secret
 }
 
@@ -57,6 +91,7 @@ func (p ParsedShare) String() string {
 		" Security:" + p.Security +
 		" Remark:" + p.Remark +
 		" ID:" + p.StableID +
+		" Params:" + p.Params.String() +
 		" Secret:" + redacted + "}"
 }
 

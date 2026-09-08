@@ -163,6 +163,15 @@ export function App() {
     try {
       const res = await postConnection(op);
       const result = interpretConnectionPost(res.status, status.connection);
+      if (res.status === 501) {
+        setNotice(result.notice);
+      } else if (res.status !== 202) {
+        setError(result.notice || "Не удалось изменить подключение");
+        if (result.refetch) {
+          await loadStatus();
+        }
+        return;
+      }
       if (result.notice) {
         setNotice(result.notice);
       }

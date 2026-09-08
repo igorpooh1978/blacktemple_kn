@@ -18,18 +18,27 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: frontend
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/xray
+            .cache/xray-host
+          key: xray-${{ hashFiles('third_party/xray.lock.json') }}
+      - name: frontend tests
         working-directory: web
         run: |
           npm ci
           npm test
+      - name: frontend build and size gate
+        working-directory: web
+        run: |
           npm run build
           npm run size
       - name: copy ui into daemon assets
         run: |
           rm -rf src/cmd/blacktempled/assets/*
           cp -a web/dist/. src/cmd/blacktempled/assets/
-      - name: go
+      - name: go fmt vet test
         env:
           CGO_ENABLED: "0"
         run: |
@@ -43,20 +52,77 @@ jobs:
           mkdir -p out/bin
           go build -o out/bin/elfcheck ./tools/elfcheck
           go build -o out/bin/ipkpack ./tools/ipkpack
-      - name: cross-compile mipsle softfloat
+          go build -o out/bin/xrayfetch ./tools/xrayfetch
+      - name: P0 mipsle daemon
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: mipsle
           GOMIPS: softfloat
         run: |
-          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled ./src/cmd/blacktempled
-      - name: ELF verify
-        run: ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled
-      - name: ipk
+          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled-mipsle ./src/cmd/blacktempled
+      - name: P0 ELF verify daemon
+        run: ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled-mipsle
+      - name: P0 IncludeXray fetch and ELF
+        env:
+          CGO_ENABLED: "0"
         run: |
-          mkdir -p out/rootfs/opt/blacktemple-kn/bin out/rootfs/opt/etc/init.d out/control
-          cp out/bin/blacktempled out/rootfs/opt/blacktemple-kn/bin/blacktempled
-          cp packaging/init/S99blacktemple-kn out/rootfs/opt/etc/init.d/S99blacktemple-kn
-          cp packaging/control/* out/control/
-          ./out/bin/ipkpack -data out/rootfs -control out/control -out out/blacktemple-kn_ci_mipsel-3.4_kn.ipk -epoch 0
+          mkdir -p out/xray-p0
+          ./out/bin/xrayfetch -lock third_party/xray.lock.json -target linux-mipsle-softfloat -cache .cache/xray -out out/xray-p0/xray
+          ./out/bin/elfcheck -class 32 -endian le -machine mips out/xray-p0/xray
+      - name: P0 IPK with Xray
+        run: |
+          mkdir -p out/rootfs-p0/opt/blacktemple-kn/bin out/rootfs-p0/opt/etc/init.d out/control-p0
+          cp out/bin/blacktempled-mipsle out/rootfs-p0/opt/blacktemple-kn/bin/blacktempled
+          cp out/xray-p0/xray out/rootfs-p0/opt/blacktemple-kn/bin/xray
+          cp packaging/init/S99blacktemple-kn out/rootfs-p0/opt/etc/init.d/S99blacktemple-kn
+          cp packaging/control/* out/control-p0/
+          VERSION=$(tr -d '\r' < VERSION)
+          sed -i "s/^Version: .*/Version: ${VERSION}/" out/control-p0/control
+          sed -i "s/^Architecture: .*/Architecture: mipsel-3.4_kn/" out/control-p0/control
+          ./out/bin/ipkpack -data out/rootfs-p0 -control out/control-p0 -out out/blacktemple-kn_${VERSION}_mipsel-3.4_kn.ipk -epoch 0 -expect-arch mipsel-3.4_kn -chmod opt/blacktemple-kn/bin/blacktempled=0755,opt/blacktemple-kn/bin/xray=0755,opt/etc/init.d/S99blacktemple-kn=0755
+          test -f out/rootfs-p0/opt/blacktemple-kn/bin/blacktempled
+          test -f out/rootfs-p0/opt/blacktemple-kn/bin/xray
+          test -f out/rootfs-p0/opt/etc/init.d/S99blacktemple-kn
+      - name: P1 mipsle daemon
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: mipsle
+          GOMIPS: softfloat
+        run: |
+          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled-mipsle-p1 ./src/cmd/blacktempled
+          ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled-mipsle-p1
+      - name: P1 mips daemon
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: mips
+          GOMIPS: softfloat
+        run: |
+          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled-mips ./src/cmd/blacktempled
+          ./out/bin/elfcheck -class 32 -endian be -machine mips out/bin/blacktempled-mips
+      - name: P1 Xray big-endian ELF
+        run: |
+          mkdir -p out/xray-p1
+          ./out/bin/xrayfetch -lock third_party/xray.lock.json -target linux-mips-softfloat -cache .cache/xray -out out/xray-p1/xray
+          ./out/bin/elfcheck -class 32 -endian be -machine mips out/xray-p1/xray
+      - name: P1 IPKs
+        run: |
+          VERSION=$(tr -d '\r' < VERSION)
+          mkdir -p out/rootfs-mipsel/opt/blacktemple-kn/bin out/rootfs-mipsel/opt/etc/init.d out/control-mipsel
+          cp out/bin/blacktempled-mipsle-p1 out/rootfs-mipsel/opt/blacktemple-kn/bin/blacktempled
+          cp out/xray-p0/xray out/rootfs-mipsel/opt/blacktemple-kn/bin/xray
+          cp packaging/init/S99blacktemple-kn out/rootfs-mipsel/opt/etc/init.d/S99blacktemple-kn
+          cp packaging/control/* out/control-mipsel/
+          sed -i "s/^Version: .*/Version: ${VERSION}/" out/control-mipsel/control
+          sed -i "s/^Architecture: .*/Architecture: mipsel-3.4/" out/control-mipsel/control
+          ./out/bin/ipkpack -data out/rootfs-mipsel -control out/control-mipsel -out out/blacktemple-kn_${VERSION}_mipsel-3.4.ipk -epoch 0 -expect-arch mipsel-3.4 -chmod opt/blacktemple-kn/bin/blacktempled=0755,opt/blacktemple-kn/bin/xray=0755,opt/etc/init.d/S99blacktemple-kn=0755
+          mkdir -p out/rootfs-mips/opt/blacktemple-kn/bin out/rootfs-mips/opt/etc/init.d out/control-mips
+          cp out/bin/blacktempled-mips out/rootfs-mips/opt/blacktemple-kn/bin/blacktempled
+          cp out/xray-p1/xray out/rootfs-mips/opt/blacktemple-kn/bin/xray
+          cp packaging/init/S99blacktemple-kn out/rootfs-mips/opt/etc/init.d/S99blacktemple-kn
+          cp packaging/control/* out/control-mips/
+          sed -i "s/^Version: .*/Version: ${VERSION}/" out/control-mips/control
+          sed -i "s/^Architecture: .*/Architecture: mips-3.4/" out/control-mips/control
+          ./out/bin/ipkpack -data out/rootfs-mips -control out/control-mips -out out/blacktemple-kn_${VERSION}_mips-3.4.ipk -epoch 0 -expect-arch mips-3.4 -chmod opt/blacktemple-kn/bin/blacktempled=0755,opt/blacktemple-kn/bin/xray=0755,opt/etc/init.d/S99blacktemple-kn=0755

@@ -22,5 +22,5 @@ export function interpretConnectionPost(
   if (httpStatus === 202) {
     return { notice: "", refetch: true };
   }
-  return { notice: "Не удалось изменить подключение", refetch: false };
+  return { notice: "Не удалось изменить подключение", refetch: true };
 }

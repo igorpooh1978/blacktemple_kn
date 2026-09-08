@@ -249,6 +249,35 @@ func TestParserSupportTable(t *testing.T) {
 	}
 }
 
+func TestParseVLESSKeepsConnectionParams(t *testing.T) {
+	raw := "vless://" + fixtureUUID + "@example.com:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=www.example.com&host=edge.example&path=/xhttp&serviceName=gun&mode=auto&alpn=h2,http/1.1&fp=chrome&pbk=test-pbk&sid=aabbccdd&spx=/&headerType=none#NL-1"
+	out, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Entries) != 1 {
+		t.Fatalf("entries=%d", len(out.Entries))
+	}
+	e := out.Entries[0]
+	p := e.Params
+	if p.Flow != "xtls-rprx-vision" || p.SNI != "www.example.com" || p.Host != "edge.example" || p.Path != "/xhttp" {
+		t.Fatalf("params=%#v", p)
+	}
+	if p.ServiceName != "gun" || p.Mode != "auto" || p.Fingerprint != "chrome" || p.RealityPublicKey != "test-pbk" || p.ShortID != "aabbccdd" || p.SpiderX != "/" || p.HeaderType != "none" {
+		t.Fatalf("params=%#v", p)
+	}
+	if len(p.ALPN) != 2 || p.ALPN[0] != "h2" || p.ALPN[1] != "http/1.1" {
+		t.Fatalf("alpn=%v", p.ALPN)
+	}
+	assertNoSecret(t, e.String())
+	assertNoSecret(t, fmt.Sprintf("%+v", e))
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoSecret(t, string(b))
+}
+
 func TestHysteriaSkippedNotImplemented(t *testing.T) {
 	body := fixtureVLESS() + "\nhysteria2://password-test@127.0.0.1:443\n"
 	out, err := Parse([]byte(body))
