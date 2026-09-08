@@ -2,7 +2,7 @@
 
 Каноническая таблица зон. Детали волн — в `agent-manifest.yml`.
 
-Текущая волна: **R4**. Merge в `main` агентам **не** разрешён.
+Текущая волна: **R5**. Merge в `main` агентам **не** разрешён.
 
 | Stream | Paths | Notes |
 | --- | --- | --- |
@@ -15,10 +15,15 @@
 | G Web | `web/` | Preact, gzip ≤ 250 KB |
 | H Build | `build.ps1`, `bootstrap.ps1`, `test.ps1`, `package.ps1`, `tools/`, `packaging/**` **кроме** `packaging/init/**` | Windows IPK/ELF + control scripts |
 | I Updater | `src/internal/updater/`, `scripts/install.sh` | GitHub Releases |
-| J Lab | `lab/`, `lab.ps1` | QEMU ≠ hardware |
+| J Lab | `lab/`, `lab.ps1`, `.github/workflows/qemu.yml` | QEMU ≠ hardware |
 | K Security | `SECURITY.md`, auth, `security.yml` | redaction, CSRF; R4 auth code is stream A |
 | L Provider | `src/internal/provider/`, `src/internal/news/`, `src/internal/support/`, `src/internal/pairing/` | optional, not core VPN |
-| M Hardware | `router-smoke.ps1`, `docs/hardware/` | KN-1011 gate |
+| M Hardware | `router-smoke.ps1`, `scripts/router-probe.sh`, `docs/hardware/` | KN-1011 gate |
+
+## R5 exclusive files
+
+- `scripts/router-probe.sh` — stream **M only**. Nobody else edits it (not I, not D, not J, not other R5 agents).
+- `scripts/install.sh` remains stream **I**.
 
 ## Packaging split (F vs H)
 
@@ -28,7 +33,7 @@
 
 ## Shared freeze
 
-Только оркестратор / явная волна (агенты R4 не трогают):
+Только оркестратор / явная волна (агенты R5 не трогают):
 
 - `contracts/`
 - `docs/adr/`

@@ -4,12 +4,12 @@ default_branch: main
 orchestration: chatgpt-main-dialog
 
 waves:
-  current: R4
+  current: R5
   frozen_contracts: true
   r4_status: integrated
   engine_vertical_slice: complete
-  merge_authorized: true
-  next_recommended: R5-routing-geodata-remote-lists-preparation
+  merge_authorized: false
+  next_recommended: R5-I after hardware+QEMU evidence (not started)
   R4:
     name: Minimal blacktempled + embedded UI + engine vertical slice
     base_sha: 41099b953e8318d2c6115e04521a2f9821627378
@@ -27,7 +27,27 @@ waves:
       G: agent/r4/web-ui
       H: agent/r4/build-package
       I: agent/r4/integration
-    notes: R4 integrated. Next is R5 routing/geodata/remote-lists preparation. R5 is not started.
+    notes: R4 integrated. Engine vertical slice complete.
+  R5:
+    name: routing DNS geodata remote-data hardware probe QEMU lab
+    base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
+    merge_authorized: false
+    parallel: true
+    agents: [O, D, E, M, J]
+    not_in_wave: [A, B, C, F, G, H, I, K, L]
+    branches:
+      O: agent/r5/orchestration
+      D: agent/r5/routing-geodata
+      E: agent/r5/remote-data
+      M: agent/r5/kn1011-probe
+      J: agent/r5/qemu-lab
+    worktrees:
+      O: blacktemple_kn-wt/r5-orchestration
+      D: blacktemple_kn-wt/r5-routing-geodata
+      E: blacktemple_kn-wt/r5-remote-data
+      M: blacktemple_kn-wt/r5-kn1011-probe
+      J: blacktemple_kn-wt/r5-qemu-lab
+    notes: Do not apply transparent routing. ADR-009 stays UNKNOWN until orchestrator. No geodata in IPK. R5-I not started.
 
 ownership:
   A_go_runtime:
@@ -54,13 +74,14 @@ ownership:
   I_updater:
     paths: [src/internal/updater/, scripts/install.sh]
   J_lab:
-    paths: [lab/, lab.ps1]
+    paths: [lab/, lab.ps1, .github/workflows/qemu.yml]
   K_security:
     paths: [SECURITY.md, src/internal/auth/, .github/workflows/security.yml]
   L_provider:
     paths: [src/internal/provider/, src/internal/news/, src/internal/support/, src/internal/pairing/]
   M_hardware:
-    paths: [router-smoke.ps1, docs/hardware/]
+    paths: [router-smoke.ps1, scripts/router-probe.sh, docs/hardware/]
+    notes: scripts/router-probe.sh is owned exclusively by M. No other agent edits it.
 
 shared_freeze:
   paths: [go.mod, go.sum, contracts/, docs/adr/]

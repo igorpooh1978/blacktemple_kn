@@ -1,0 +1,51 @@
+wave: R5
+task: qemu-lab
+agent: J
+branch: agent/r5/qemu-lab
+worktree: blacktemple_kn-wt/r5-qemu-lab
+base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
+merge_authorized: false
+
+goal: >
+  QEMU MIPSLE lab and qemu.yml workflow. QEMU is not KN-1011 and is not an
+  MT7621 emulator. Do not treat QEMU PASS as hardware PASS.
+
+allowed_paths:
+  - lab/
+  - lab.ps1
+  - .github/workflows/qemu.yml
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - src/
+  - router-smoke.ps1
+  - scripts/
+  - docs/hardware/
+  - .github/workflows/ci.yml
+  - .github/workflows/security.yml
+  - .github/workflows/release.yml
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-002 (MIPSLE softfloat); ADR-009 remains UNKNOWN
+  - other_r5_agents: none (QEMU evidence is separate from M hardware probe)
+
+acceptance_criteria:
+  - lab/, lab.ps1, and .github/workflows/qemu.yml only. Images and qcow2 stay gitignored.
+  - QEMU ≠ KN-1011. Do not report QEMU PASS as KN-1011 PASS. Do not claim MT7621 emulation.
+  - Do not apply transparent routing in the lab as a production capture choice. Do not choose TrafficCaptureEngine. ADR-009 stays UNKNOWN until ChatGPT orchestrator after M+J evidence.
+  - Do not put geodata in IPK. Do not edit scripts/router-probe.sh (M exclusive).
+  - If QEMU is not actually run, status stays NOT RUN. Do not invent traces.
+  - Do not merge main. Push only agent/r5/qemu-lab. R5-I is not started by this agent.
+
+do_not:
+  - equate QEMU with KN-1011 hardware
+  - commit VM images, qcow2, or secrets
+  - apply capture engine / live iptables as ADR-009 selection
+  - change ADR-009
+  - merge any branch

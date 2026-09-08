@@ -1,0 +1,50 @@
+wave: R5
+task: kn1011-probe
+agent: M
+branch: agent/r5/kn1011-probe
+worktree: blacktemple_kn-wt/r5-kn1011-probe
+base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
+merge_authorized: false
+
+goal: >
+  Read-only KN-1011 capability probe and smoke scaffolding. Record kernel
+  evidence. Do not apply routing. Do not select TrafficCaptureEngine.
+
+allowed_paths:
+  - router-smoke.ps1
+  - scripts/router-probe.sh
+  - docs/hardware/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - lab/
+  - lab.ps1
+  - .github/workflows/
+  - src/
+  - scripts/install.sh
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-009 remains UNKNOWN (probe evidence only; orchestrator chooses engine)
+  - other_r5_agents: none (do not wait for J; QEMU is not KN-1011)
+
+acceptance_criteria:
+  - scripts/router-probe.sh is owned exclusively by M. No other agent edits it.
+  - Probe is read-only: collect kernel/iptables/TPROXY/TUN/fwmark/policy-routing/ipset/UDP capability evidence. Do not install BTKN_ rules, do not apply transparent routing, do not flush foreign chains.
+  - router-smoke.ps1 remains the Windows entry; credentials never committed. Missing CredentialSource stays NOT RUN / exit 2, not a fake PASS.
+  - docs/hardware/ records real commands and output. If not run on KN-1011, status stays NOT RUN. Do not invent PASS.
+  - Do not choose TrafficCaptureEngine. ADR-009 stays UNKNOWN until ChatGPT orchestrator after M+J evidence.
+  - Do not put geodata in IPK. Do not merge main. Push only agent/r5/kn1011-probe. R5-I is not started by this agent.
+
+do_not:
+  - apply iptables/TPROXY/TUN or any capture engine
+  - write secrets, keys, or router passwords into git
+  - report QEMU results as KN-1011 PASS
+  - change ADR-009
+  - merge any branch
+  - let any other agent edit scripts/router-probe.sh

@@ -1,0 +1,57 @@
+wave: R5
+task: routing-geodata
+agent: D
+branch: agent/r5/routing-geodata
+worktree: blacktemple_kn-wt/r5-routing-geodata
+base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
+merge_authorized: false
+
+goal: >
+  Routing, DNS, and geodata library packages. Do not apply transparent
+  routing. Do not select TrafficCaptureEngine. ADR-009 stays UNKNOWN.
+
+allowed_paths:
+  - src/internal/routing/
+  - src/internal/dns/
+  - src/internal/geodata/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - lab/
+  - lab.ps1
+  - router-smoke.ps1
+  - scripts/
+  - .github/workflows/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - src/internal/remotelists/
+  - src/internal/remotepolicy/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-009 remains UNKNOWN (do not change); ADR-003 Xray is a pinned external binary
+  - other_r5_agents: none (do not wait for M/J; do not choose capture engine)
+
+acceptance_criteria:
+  - Packages live only under src/internal/routing/, dns/, geodata/. No custom geo engine in daemon RAM; geodata is Xray files on disk.
+  - Do not apply transparent routing. No live iptables, TPROXY, TUN, fwmark, or policy-routing install on any host.
+  - Do not import Xray as a Go library. Do not spawn xray. Routing types may describe Xray routing JSON conceptually without importing xray-core.
+  - Do not choose TrafficCaptureEngine. ADR-009 stays UNKNOWN until ChatGPT orchestrator after M+J evidence.
+  - Do not put geoip.dat / geosite.dat in IPK or git. No geodata in IPK.
+  - CGO_ENABLED=0. No new go.mod dependencies. Unit tests without real iptables or hardware.
+  - Do not merge main. Push only agent/r5/routing-geodata. R5-I is not started by this agent.
+
+do_not:
+  - apply or run real iptables / TPROXY / policy routing
+  - import github.com/xtls/xray-core or any xray Go module
+  - change ADR-009 or mark capture engine selected
+  - add geodata binaries to IPK or the repository
+  - merge any branch

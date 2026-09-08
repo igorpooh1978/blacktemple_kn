@@ -1,0 +1,56 @@
+wave: R5
+task: remote-data
+agent: E
+branch: agent/r5/remote-data
+worktree: blacktemple_kn-wt/r5-remote-data
+base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
+merge_authorized: false
+
+goal: >
+  RemoteListManager and remotepolicy allowlist against frozen schemas.
+  SSRF-safe fetches. No executable remote payloads. No geodata in IPK.
+
+allowed_paths:
+  - src/internal/remotelists/
+  - src/internal/remotepolicy/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - lab/
+  - lab.ps1
+  - router-smoke.ps1
+  - scripts/
+  - .github/workflows/
+  - src/internal/routing/
+  - src/internal/dns/
+  - src/internal/geodata/
+  - src/internal/xray/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-010, contracts/schemas/remote-policy.schema.json, contracts/schemas/list-manifest.schema.json
+  - other_r5_agents: none (library only; do not wait for D/M/J)
+
+acceptance_criteria:
+  - remotepolicy accepts only allowlisted keys/types from remote-policy.schema.json. additionalProperties false. No shell, firewall text, wipe, download+exec, or silent daemon restart from remote values.
+  - remotelists supports ETag / If-Modified-Since / TTL / backoff / checksum / atomic replace / rollback / offline cache. Never delete a working list before the new one validates.
+  - SSRF: fetch only http(s) URLs from the allowlist; reject loopback, link-local, private, metadata, and non-http(s) schemes. No follow to those destinations. Timeouts required.
+  - Remote payload is data, never executable. Do not apply transparent routing. Do not choose TrafficCaptureEngine. ADR-009 stays UNKNOWN.
+  - Do not bundle geodata into IPK or git. GPL geodata sources stay not enabled (THIRD_PARTY_NOTICES).
+  - CGO_ENABLED=0. No new go.mod dependencies. Unit tests for allowlist reject, SSRF reject, and rollback without live WAN.
+  - Do not merge main. Push only agent/r5/remote-data. R5-I is not started by this agent.
+
+do_not:
+  - fetch arbitrary URLs or disable SSRF checks
+  - execute remote content
+  - put geodata in IPK
+  - change ADR-009 / ADR-010
+  - merge any branch
