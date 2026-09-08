@@ -55,5 +55,5 @@ on that date and will change.
 ## Manager policy
 
 - No default download URL.
-- Install is local-file only (size limit, SHA256, Validator, atomic replace).
+- Install is local-file only (size limit, SHA256, Validator, immutable set + atomic state.json).
 - Official Xray-core geoip/geosite are a separate upstream; not bundled here.

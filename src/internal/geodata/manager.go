@@ -2,33 +2,40 @@ package geodata
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/atomicfile"
 )
 
-// Options configure a Manager. MaxFileBytes and MaxBackups use defaults when <= 0.
+// Options configure a Manager. MaxFileBytes and MaxSets use defaults when <= 0.
 type Options struct {
 	MaxFileBytes int64
-	MaxBackups   int
+	MaxSets      int
 	Now          func() time.Time
+	Pointer      *atomicfile.Writer
 }
 
-// Manager owns geodata file slots under DataDir/geodata/{active,previous,candidate}.
+// Manager owns immutable geodata sets under DataDir/geodata/sets and a
+// state.json pointer. Last-known-good is never renamed or deleted to install.
 type Manager struct {
 	dataDir  string
 	root     string
 	validate Validator
 	maxBytes int64
-	backups  int
+	maxSets  int
 	now      func() time.Time
+	pointer  *atomicfile.Writer
+	seq      uint64
 	mu       sync.Mutex
+
+	writeMeta func(path string, data []byte, perm os.FileMode) error
+	copyFile  func(src, dest string) (int64, string, error)
+	removeAll func(string) error
 }
 
 func NewManager(dataDir string, v Validator, opts Options) (*Manager, error) {
@@ -42,241 +49,90 @@ func NewManager(dataDir string, v Validator, opts Options) (*Manager, error) {
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxFileBytes
 	}
-	backups := opts.MaxBackups
-	if backups <= 0 {
-		backups = defaultMaxBackups
+	maxSets := opts.MaxSets
+	if maxSets <= 0 {
+		maxSets = defaultMaxSets
 	}
-	if backups > 2 {
-		backups = 2
+	if maxSets < 2 {
+		maxSets = 2
+	}
+	if maxSets > 3 {
+		maxSets = 3
 	}
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	root := filepath.Join(dataDir, "geodata")
-	return &Manager{
+	m := &Manager{
 		dataDir:  dataDir,
 		root:     root,
 		validate: v,
 		maxBytes: maxBytes,
-		backups:  backups,
+		maxSets:  maxSets,
 		now:      now,
-	}, nil
-}
-
-func (m *Manager) slotPath(slot string) string {
-	return filepath.Join(m.root, slot)
-}
-
-func (m *Manager) Active() Snapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	snap, err := m.loadSnapshot(slotActive)
-	if err != nil {
-		return Snapshot{
-			GeoIP:   missingMeta(),
-			GeoSite: missingMeta(),
-			Slot:    slotActive,
-		}
+		pointer:  opts.Pointer,
 	}
-	return snap
+	m.writeMeta = writeNewFileSync
+	m.copyFile = func(src, dest string) (int64, string, error) {
+		return streamCopyFile(src, dest, m.maxBytes)
+	}
+	m.removeAll = os.RemoveAll
+	_ = m.Recover()
+	return m, nil
 }
 
-// Install stages a local candidate, verifies size and SHA256, runs Validator,
-// then atomically replaces active. On failure the working (active) files stay.
-func (m *Manager) Install(ctx context.Context, c Candidate) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *Manager) setsDir() string {
+	return filepath.Join(m.root, dirSets)
+}
 
-	candDir := m.slotPath(slotCandidate)
-	_ = os.RemoveAll(candDir)
-	if err := os.MkdirAll(candDir, 0o755); err != nil {
+func (m *Manager) setDir(id string) string {
+	return filepath.Join(m.setsDir(), id)
+}
+
+func (m *Manager) statePath() string {
+	return filepath.Join(m.root, fileState)
+}
+
+func (m *Manager) writePointer(st pointerState) error {
+	b, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
 		return err
 	}
+	w := m.pointer
+	if w == nil {
+		return atomicfile.WriteFile(m.statePath(), b, 0o600)
+	}
+	return w.WriteFile(m.statePath(), b, 0o600)
+}
 
-	now := m.now()
-	geoIPMeta, err := m.stageFile(c.GeoIPPath, filepath.Join(candDir, fileGeoIP), c.GeoIPSHA256, c.Source, c.Version, now)
+func (m *Manager) loadState() (pointerState, error) {
+	b, err := os.ReadFile(m.statePath())
 	if err != nil {
-		m.writeFailed(candDir, Metadata{Source: c.Source, Version: c.Version, Status: StatusFailed}, missingMeta(), now)
-		return err
+		return pointerState{}, err
 	}
-	geoSiteMeta, err := m.stageFile(c.GeoSitePath, filepath.Join(candDir, fileGeoSite), c.GeoSiteSHA256, c.Source, c.Version, now)
-	if err != nil {
-		m.writeFailed(candDir, geoIPMeta.withStatus(StatusFailed), Metadata{Source: c.Source, Version: c.Version, Status: StatusFailed}, now)
-		return err
+	var st pointerState
+	if err := json.Unmarshal(b, &st); err != nil {
+		return pointerState{}, fmt.Errorf("%w: %v", ErrCorruptState, err)
 	}
+	return st, nil
+}
 
-	geoIPMeta.Status = StatusDownloaded
-	geoSiteMeta.Status = StatusDownloaded
-	_ = m.writeSnapshot(candDir, Snapshot{GeoIP: geoIPMeta, GeoSite: geoSiteMeta, Slot: slotCandidate, UpdatedAt: now})
-
-	ipPath := filepath.Join(candDir, fileGeoIP)
-	sitePath := filepath.Join(candDir, fileGeoSite)
-	if err := m.validate.Validate(ctx, ipPath, sitePath); err != nil {
-		geoIPMeta.Status = StatusFailed
-		geoSiteMeta.Status = StatusFailed
-		_ = m.writeSnapshot(candDir, Snapshot{GeoIP: geoIPMeta, GeoSite: geoSiteMeta, Slot: slotCandidate, UpdatedAt: now})
-		return fmt.Errorf("%w: %v", ErrValidate, err)
+func (m *Manager) setComplete(id string) bool {
+	if id == "" {
+		return false
 	}
-
-	geoIPMeta.Status = StatusValidated
-	geoSiteMeta.Status = StatusValidated
-	geoIPMeta.ValidatedAt = now
-	geoSiteMeta.ValidatedAt = now
-
-	before, _ := m.loadSnapshot(slotActive)
-
-	if err := m.rotateBackups(); err != nil {
-		geoIPMeta.Status = StatusFailed
-		geoSiteMeta.Status = StatusFailed
-		_ = m.writeSnapshot(candDir, Snapshot{GeoIP: geoIPMeta, GeoSite: geoSiteMeta, Slot: slotCandidate, UpdatedAt: now})
-		return err
-	}
-
-	geoIPMeta.Status = StatusActive
-	geoSiteMeta.Status = StatusActive
-	if err := m.writeSnapshot(candDir, Snapshot{GeoIP: geoIPMeta, GeoSite: geoSiteMeta, Slot: slotActive, UpdatedAt: now}); err != nil {
-		return err
-	}
-
-	activeDir := m.slotPath(slotActive)
-	if err := os.Rename(candDir, activeDir); err != nil {
-		_ = os.RemoveAll(activeDir)
-		if err2 := os.Rename(candDir, activeDir); err2 != nil {
-			m.restoreActive(before)
-			return err2
+	dir := m.setDir(id)
+	for _, name := range []string{fileGeoIP, fileGeoSite, fileMeta} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return false
 		}
 	}
-	_ = syncDir(m.root)
-	return nil
+	return true
 }
 
-func (m Metadata) withStatus(s Status) Metadata {
-	m.Status = s
-	return m
-}
-
-func (m *Manager) writeFailed(dir string, ip, site Metadata, now time.Time) {
-	ip.Status = StatusFailed
-	site.Status = StatusFailed
-	_ = m.writeSnapshot(dir, Snapshot{GeoIP: ip, GeoSite: site, Slot: slotCandidate, UpdatedAt: now})
-}
-
-func (m *Manager) stageFile(src, dest, wantSHA, source, version string, now time.Time) (Metadata, error) {
-	if src == "" {
-		return Metadata{Status: StatusFailed}, ErrMissingCandidate
-	}
-	st, err := os.Stat(src)
-	if err != nil {
-		return Metadata{Status: StatusFailed}, fmt.Errorf("%w: %v", ErrMissingCandidate, err)
-	}
-	if st.Size() > m.maxBytes {
-		return Metadata{Source: source, Version: version, Size: st.Size(), Status: StatusFailed}, ErrOversized
-	}
-	if wantSHA == "" {
-		return Metadata{Source: source, Version: version, Size: st.Size(), Status: StatusFailed}, ErrMissingChecksum
-	}
-	sum, err := fileSHA256(src)
-	if err != nil {
-		return Metadata{Status: StatusFailed}, err
-	}
-	if sum != wantSHA {
-		return Metadata{Source: source, Version: version, SHA256: sum, Size: st.Size(), Status: StatusFailed}, ErrChecksum
-	}
-	if err := copyFileSync(src, dest, 0o644); err != nil {
-		return Metadata{Status: StatusFailed}, err
-	}
-	return Metadata{
-		Source:       source,
-		Version:      version,
-		SHA256:       sum,
-		Size:         st.Size(),
-		DownloadedAt: now,
-		Status:       StatusDownloaded,
-	}, nil
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func (m *Manager) rotateBackups() error {
-	active := m.slotPath(slotActive)
-	prev := m.slotPath(slotPrevious)
-	prev2 := m.slotPath(slotPrevious2)
-
-	if m.backups >= 2 {
-		_ = os.RemoveAll(prev2)
-		if _, err := os.Stat(prev); err == nil {
-			if err := os.Rename(prev, prev2); err != nil {
-				return err
-			}
-		}
-	} else {
-		_ = os.RemoveAll(prev)
-		_ = os.RemoveAll(prev2)
-	}
-	if _, err := os.Stat(active); err == nil {
-		if err := os.Rename(active, prev); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *Manager) restoreActive(before Snapshot) {
-	prev := m.slotPath(slotPrevious)
-	active := m.slotPath(slotActive)
-	if _, err := os.Stat(prev); err != nil {
-		return
-	}
-	_ = os.RemoveAll(active)
-	_ = os.Rename(prev, active)
-	_ = before
-}
-
-// Rollback promotes previous → active. Current active moves to candidate.
-func (m *Manager) Rollback() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	prev := m.slotPath(slotPrevious)
-	if _, err := os.Stat(prev); err != nil {
-		return ErrNoPrevious
-	}
-	cand := m.slotPath(slotCandidate)
-	_ = os.RemoveAll(cand)
-	active := m.slotPath(slotActive)
-	if _, err := os.Stat(active); err == nil {
-		if err := os.Rename(active, cand); err != nil {
-			return err
-		}
-	}
-	if err := os.Rename(prev, active); err != nil {
-		if _, cErr := os.Stat(cand); cErr == nil {
-			_ = os.Rename(cand, active)
-		}
-		return err
-	}
-	prev2 := m.slotPath(slotPrevious2)
-	if _, err := os.Stat(prev2); err == nil {
-		_ = os.Rename(prev2, prev)
-	}
-	_ = syncDir(m.root)
-	return nil
-}
-
-func (m *Manager) loadSnapshot(slot string) (Snapshot, error) {
-	path := filepath.Join(m.slotPath(slot), fileMeta)
+func (m *Manager) loadSetMeta(id string) (Snapshot, error) {
+	path := filepath.Join(m.setDir(id), fileMeta)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Snapshot{}, err
@@ -285,29 +141,236 @@ func (m *Manager) loadSnapshot(slot string) (Snapshot, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return Snapshot{}, err
 	}
-	s.Slot = slot
+	s.SetID = id
+	s.Slot = id
 	return s, nil
 }
 
-func (m *Manager) writeSnapshot(dir string, s Snapshot) error {
-	b, err := json.MarshalIndent(s, "", "  ")
+func (m *Manager) resolveIDs() (active, previous string, err error) {
+	st, err := m.loadState()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	if m.setComplete(st.Active) {
+		prev := st.Previous
+		if !m.setComplete(prev) {
+			prev = ""
+		}
+		return st.Active, prev, nil
+	}
+	if m.setComplete(st.Previous) {
+		return st.Previous, "", ErrMissingActiveSet
+	}
+	if st.Active != "" {
+		return "", "", ErrMissingActiveSet
+	}
+	return "", "", nil
+}
+
+// Active returns metadata for the authoritative set (active, or previous if
+// the pointer's active directory is gone).
+func (m *Manager) Active() Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, _, err := m.resolveIDs()
+	if id == "" {
+		return Snapshot{GeoIP: missingMeta(), GeoSite: missingMeta()}
+	}
+	snap, loadErr := m.loadSetMeta(id)
+	if loadErr != nil {
+		_ = err
+		return Snapshot{GeoIP: missingMeta(), GeoSite: missingMeta(), SetID: id, Slot: id}
+	}
+	return snap
+}
+
+// ActivePaths returns on-disk locations for the current set. R5 does not embed
+// these paths into Xray config.
+func (m *Manager) ActivePaths() (ActivePaths, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, _, err := m.resolveIDs()
+	if id == "" {
+		if err != nil {
+			return ActivePaths{}, err
+		}
+		return ActivePaths{}, ErrMissingActiveSet
+	}
+	snap, loadErr := m.loadSetMeta(id)
+	if loadErr != nil {
+		if err != nil {
+			return ActivePaths{}, err
+		}
+		return ActivePaths{}, loadErr
+	}
+	p := ActivePaths{
+		SetID:         id,
+		Version:       snap.GeoIP.Version,
+		GeoIPPath:     filepath.Join(m.setDir(id), fileGeoIP),
+		GeoSitePath:   filepath.Join(m.setDir(id), fileGeoSite),
+		GeoIPSHA256:   snap.GeoIP.SHA256,
+		GeoSiteSHA256: snap.GeoSite.SHA256,
+	}
+	return p, err
+}
+
+// Install copies a local candidate into a new immutable set, then atomically
+// replaces state.json. The previous active set is not modified until the pointer
+// commit.
+func (m *Manager) Install(ctx context.Context, c Candidate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := os.MkdirAll(m.setsDir(), 0o755); err != nil {
+		return err
+	}
+
+	now := m.now()
+	oldActive, oldPrevious, _ := m.resolveIDs()
+
+	setID := m.newSetID()
+	setDir := m.setDir(setID)
+	if err := os.MkdirAll(setDir, 0o755); err != nil {
+		return err
+	}
+
+	ipMeta, err := m.stageFile(c.GeoIPPath, filepath.Join(setDir, fileGeoIP), c.GeoIPSHA256, c.Source, c.Version, now)
 	if err != nil {
 		return err
 	}
-	return writeFileSync(filepath.Join(dir, fileMeta), b, 0o600)
+	siteMeta, err := m.stageFile(c.GeoSitePath, filepath.Join(setDir, fileGeoSite), c.GeoSiteSHA256, c.Source, c.Version, now)
+	if err != nil {
+		return err
+	}
+
+	ipPath := filepath.Join(setDir, fileGeoIP)
+	sitePath := filepath.Join(setDir, fileGeoSite)
+	if err := m.validate.Validate(ctx, ipPath, sitePath); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidate, err)
+	}
+
+	ipMeta.Status = StatusActive
+	siteMeta.Status = StatusActive
+	ipMeta.ValidatedAt = now
+	siteMeta.ValidatedAt = now
+	snap := Snapshot{
+		GeoIP:     ipMeta,
+		GeoSite:   siteMeta,
+		SetID:     setID,
+		Slot:      setID,
+		UpdatedAt: now,
+	}
+	metaBytes, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := m.writeMeta(filepath.Join(setDir, fileMeta), metaBytes, 0o600); err != nil {
+		return err
+	}
+	_ = atomicfile.SyncDir(setDir)
+
+	st := pointerState{Active: setID, Previous: oldActive}
+	if err := m.writePointer(st); err != nil {
+		return err
+	}
+
+	keep := map[string]struct{}{setID: {}, oldActive: {}}
+	if oldPrevious != "" && oldPrevious != oldActive && oldPrevious != setID {
+		if len(keep) < m.maxSets {
+			keep[oldPrevious] = struct{}{}
+		}
+	}
+	_ = m.gcLocked(keep)
+	return nil
 }
 
-func (m *Manager) backupSlots() []string {
-	var out []string
-	for _, slot := range []string{slotPrevious, slotPrevious2} {
-		if _, err := os.Stat(m.slotPath(slot)); err == nil {
-			out = append(out, slot)
+func (m *Manager) newSetID() string {
+	m.seq++
+	return fmt.Sprintf("set-%d-%d", m.now().UnixNano(), m.seq)
+}
+
+func (m *Manager) stageFile(src, dest, wantSHA, source, version string, now time.Time) (Metadata, error) {
+	if wantSHA == "" {
+		return Metadata{Source: source, Version: version, Status: StatusFailed}, ErrMissingChecksum
+	}
+	size, sum, err := m.copyFile(src, dest)
+	if err != nil {
+		return Metadata{Source: source, Version: version, Status: StatusFailed}, err
+	}
+	if sum != wantSHA {
+		return Metadata{Source: source, Version: version, SHA256: sum, Size: size, Status: StatusFailed}, ErrChecksum
+	}
+	return Metadata{
+		Source:       source,
+		Version:      version,
+		SHA256:       sum,
+		Size:         size,
+		DownloadedAt: now,
+		Status:       StatusDownloaded,
+	}, nil
+}
+
+// Rollback swaps state.active and state.previous via atomic state.json replace.
+func (m *Manager) Rollback() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	st, err := m.loadState()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrNoPrevious
 		}
+		return err
+	}
+	if st.Previous == "" || !m.setComplete(st.Previous) {
+		return ErrNoPrevious
+	}
+	next := pointerState{Active: st.Previous, Previous: st.Active}
+	return m.writePointer(next)
+}
+
+func (m *Manager) gcLocked(keep map[string]struct{}) error {
+	entries, err := os.ReadDir(m.setsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var gcErr error
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, ok := keep[e.Name()]; ok {
+			continue
+		}
+		if err := m.removeAll(m.setDir(e.Name())); err != nil && gcErr == nil {
+			gcErr = err
+		}
+	}
+	return gcErr
+}
+
+func (m *Manager) retainedSetIDs() []string {
+	id, prev, _ := m.resolveIDs()
+	var out []string
+	if id != "" {
+		out = append(out, id)
+	}
+	if prev != "" && prev != id {
+		out = append(out, prev)
 	}
 	return out
 }
 
-func (m *Manager) fileExists(slot, name string) bool {
-	_, err := os.Stat(filepath.Join(m.slotPath(slot), name))
+func (m *Manager) fileExists(id, name string) bool {
+	if id == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(m.setDir(id), name))
 	return err == nil
 }

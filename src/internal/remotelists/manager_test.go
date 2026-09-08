@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/atomicfile"
 )
 
 type constBackoff time.Duration
@@ -261,14 +264,18 @@ func TestAtomicReplaceAndLastKnownGood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(bodyPath(dir))
+	st, err := loadPointer(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(bodyPath(revisionDir(dir, st.Active)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(raw) != "two.example\n" {
 		t.Fatalf("on disk %q", raw)
 	}
-	matches, _ := filepath.Glob(filepath.Join(dir, "list-*.tmp"))
+	matches, _ := filepath.Glob(filepath.Join(dir, ".atomic-*.tmp"))
 	if len(matches) != 0 {
 		t.Fatalf("tmp leftovers %v", matches)
 	}
@@ -352,5 +359,248 @@ func TestCountriesCacheWithoutParser(t *testing.T) {
 	}
 	if len(res.Body) == 0 {
 		t.Fatal("body must be cached")
+	}
+}
+
+func countRevisions(t *testing.T, m *Manager, id string) int {
+	t.Helper()
+	dir, err := listDir(m.Dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(revisionsDir(dir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
+}
+
+func currentPointer(t *testing.T, m *Manager, id string) pointerState {
+	t.Helper()
+	dir, err := listDir(m.Dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadPointer(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestHTTP304DoesNotCreateRevision(t *testing.T) {
+	const etag = `"v1"`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		io.WriteString(w, "ok.example\n")
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	desc := domainDesc("etag2", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	before := currentPointer(t, m, desc.ID)
+	n1 := countRevisions(t, m, desc.ID)
+	second, err := m.Update(context.Background(), desc)
+	if err != nil || second.Status != StatusNotModified {
+		t.Fatalf("status=%s err=%v", second.Status, err)
+	}
+	after := currentPointer(t, m, desc.ID)
+	if after != before {
+		t.Fatalf("pointer changed on 304: %+v -> %+v", before, after)
+	}
+	if countRevisions(t, m, desc.ID) != n1 {
+		t.Fatal("304 must not create a revision")
+	}
+}
+
+func TestRevisionWriteFailKeepsLKG(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			io.WriteString(w, "one.example\n")
+			return
+		}
+		io.WriteString(w, "two.example\n")
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	m.Attempts = 1
+	desc := domainDesc("revfail", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	before := currentPointer(t, m, desc.ID)
+	m.writeRevision = func(listDir string, desc Descriptor, body []byte, etag, lastModified, sum string, fetchedAt time.Time) (string, error) {
+		return "", errors.New("revision write fail")
+	}
+	res, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusLastKnownGood || string(res.Body) != "one.example\n" {
+		t.Fatalf("status=%s body=%q", res.Status, res.Body)
+	}
+	after := currentPointer(t, m, desc.ID)
+	if after != before {
+		t.Fatalf("pointer moved: %+v", after)
+	}
+}
+
+func TestPointerCommitFailKeepsLKG(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			io.WriteString(w, "one.example\n")
+			return
+		}
+		io.WriteString(w, "two.example\n")
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	m.Attempts = 1
+	desc := domainDesc("ptrfail", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	before := currentPointer(t, m, desc.ID)
+	injected := errors.New("current.json replace fail")
+	m.pointer = &atomicfile.Writer{Replace: func(tmp, dest string) error {
+		return injected
+	}}
+	res, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusLastKnownGood || string(res.Body) != "one.example\n" {
+		t.Fatalf("status=%s body=%q", res.Status, res.Body)
+	}
+	after := currentPointer(t, m, desc.ID)
+	if after.Active != before.Active {
+		t.Fatalf("active moved to %s", after.Active)
+	}
+}
+
+func TestTimeoutKeepsLKG(t *testing.T) {
+	release := make(chan struct{})
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			io.WriteString(w, "cached.example\n")
+			return
+		}
+		<-release
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	m := testManager(t, srv)
+	desc := domainDesc("tolkg", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	m.Timeout = 50 * time.Millisecond
+	m.Attempts = 1
+	res, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusLastKnownGood || string(res.Body) != "cached.example\n" {
+		t.Fatalf("status=%s body=%q err=%v", res.Status, res.Body, err)
+	}
+}
+
+func TestRedirectBlockedKeepsLKG(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			io.WriteString(w, "safe.example\n")
+			return
+		}
+		http.Redirect(w, r, "file:///etc/passwd", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	m.Attempts = 1
+	desc := domainDesc("redir2", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusLastKnownGood || string(res.Body) != "safe.example\n" {
+		t.Fatalf("status=%s body=%q err=%v", res.Status, res.Body, err)
+	}
+}
+
+func TestChecksumFailKeepsLKG(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			io.WriteString(w, "pin.example\n")
+			return
+		}
+		io.WriteString(w, "other.example\n")
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	m.Attempts = 1
+	desc := domainDesc("sumlkg", srv.URL)
+	first, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc.SHA256 = first.SHA256
+	res, err := m.Update(context.Background(), desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusLastKnownGood || string(res.Body) != "pin.example\n" {
+		t.Fatalf("status=%s body=%q", res.Status, res.Body)
+	}
+}
+
+func TestOrphanRevisionNotActivated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "live.example\n")
+	}))
+	t.Cleanup(srv.Close)
+	m := testManager(t, srv)
+	desc := domainDesc("orphan", srv.URL)
+	if _, err := m.Update(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := listDir(m.Dir, desc.ID)
+	orphan := filepath.Join(revisionsDir(dir), "rev-orphan")
+	if err := os.MkdirAll(orphan, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "body"), []byte("orphan.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recoverAllLists(m.Dir, os.RemoveAll)
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatal("orphan revision must be collected")
+	}
+	got, err := m.Load(desc)
+	if err != nil || string(got.Body) != "live.example\n" {
+		t.Fatalf("load=%s err=%v", got, err)
 	}
 }

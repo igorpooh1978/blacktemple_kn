@@ -4,11 +4,11 @@
 // whatsapp-ips, provider-routing, geosite-catalog. Entries keep metadata
 // (line, canonical value); callers must not treat a list as a bare []string.
 //
-// Update workflow: read cache → conditional GET (If-None-Match /
+// Update workflow: read current.json → conditional GET (If-None-Match /
 // If-Modified-Since) → size-capped read (io.LimitReader) → validate →
-// checksum if pinned → write candidate → fsync → atomic replace.
-// HTTP 304 reuses the cache. Network failure returns last-known-good when
-// present. Ordinary refresh/backoff intervals are hours or days, not seconds.
+// checksum if pinned → write immutable revision → fsync → atomic current.json.
+// HTTP 304 reuses the current revision and does not create a new one.
+// Network or disk failure leaves the current pointer unchanged.
 //
 // SSRF: default HTTPS only; dial and redirect check the resolved destination
 // (not a hostname allowlist). Loopback, link-local, multicast, unspecified,

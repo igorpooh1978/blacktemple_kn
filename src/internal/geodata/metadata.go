@@ -16,6 +16,8 @@ var (
 	ErrNoPrevious       = errors.New("geodata: no previous slot to roll back")
 	ErrSourceDisabled   = errors.New("geodata: no geodata source is enabled")
 	ErrMissingCandidate = errors.New("geodata: candidate file missing")
+	ErrMissingActiveSet = errors.New("geodata: active set is missing")
+	ErrCorruptState     = errors.New("geodata: state pointer is unusable")
 )
 
 // Status is the lifecycle state of a geodata file.
@@ -40,11 +42,12 @@ type Metadata struct {
 	Status       Status    `json:"status"`
 }
 
-// Snapshot is active/previous/candidate metadata without loading .dat.
+// Snapshot is active-set metadata without loading .dat into RAM.
 type Snapshot struct {
 	GeoIP     Metadata  `json:"geoip"`
 	GeoSite   Metadata  `json:"geosite"`
-	Slot      string    `json:"slot"`
+	SetID     string    `json:"setId"`
+	Slot      string    `json:"slot,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -68,16 +71,31 @@ type Candidate struct {
 	GeoSiteSHA256 string
 }
 
+// ActivePaths locates the current geodata set on disk. R5 does not wire these
+// into Xray config.
+type ActivePaths struct {
+	SetID         string
+	Version       string
+	GeoIPPath     string
+	GeoSitePath   string
+	GeoIPSHA256   string
+	GeoSiteSHA256 string
+}
+
+// pointerState is the durable active/previous set pointer.
+type pointerState struct {
+	Active   string `json:"active"`
+	Previous string `json:"previous"`
+}
+
 const (
 	fileGeoIP   = "geoip.dat"
 	fileGeoSite = "geosite.dat"
 	fileMeta    = "metadata.json"
+	fileState   = "state.json"
 
-	slotActive    = "active"
-	slotPrevious  = "previous"
-	slotPrevious2 = "previous2"
-	slotCandidate = "candidate"
+	dirSets = "sets"
 
 	defaultMaxFileBytes int64 = 32 << 20 // 32 MiB per file
-	defaultMaxBackups         = 2
+	defaultMaxSets            = 3
 )

@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/atomicfile"
 )
 
 type cacheMeta struct {
@@ -20,6 +23,11 @@ type cacheMeta struct {
 	LastModified string `json:"lastModified"`
 	SHA256       string `json:"sha256"`
 	FetchedAt    string `json:"fetchedAt"`
+}
+
+type pointerState struct {
+	Active   string `json:"active"`
+	Previous string `json:"previous"`
 }
 
 func safeID(id string) (string, error) {
@@ -44,15 +52,90 @@ func listDir(root, id string) (string, error) {
 	return filepath.Join(root, sid), nil
 }
 
-func bodyPath(dir string) string { return filepath.Join(dir, "body") }
-func metaPath(dir string) string { return filepath.Join(dir, "meta.json") }
+func revisionsDir(dir string) string {
+	return filepath.Join(dir, "revisions")
+}
+
+func currentPath(dir string) string {
+	return filepath.Join(dir, "current.json")
+}
+
+func revisionDir(listRoot, revID string) string {
+	return filepath.Join(revisionsDir(listRoot), revID)
+}
+
+func bodyPath(revDir string) string { return filepath.Join(revDir, "body") }
+func metaPath(revDir string) string { return filepath.Join(revDir, "meta.json") }
+
+func loadPointer(dir string) (pointerState, error) {
+	raw, err := os.ReadFile(currentPath(dir))
+	if err != nil {
+		return pointerState{}, err
+	}
+	var st pointerState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return pointerState{}, err
+	}
+	return st, nil
+}
+
+func revisionComplete(dir, revID string) bool {
+	if revID == "" {
+		return false
+	}
+	rev := revisionDir(dir, revID)
+	if _, err := os.Stat(bodyPath(rev)); err != nil {
+		return false
+	}
+	if _, err := os.Stat(metaPath(rev)); err != nil {
+		return false
+	}
+	return true
+}
+
+func resolveRevision(dir string) (active, previous string, err error) {
+	st, err := loadPointer(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", ErrNoCache
+		}
+		return "", "", err
+	}
+	if revisionComplete(dir, st.Active) {
+		prev := st.Previous
+		if !revisionComplete(dir, prev) {
+			prev = ""
+		}
+		return st.Active, prev, nil
+	}
+	if revisionComplete(dir, st.Previous) {
+		return st.Previous, "", ErrMissingRevision
+	}
+	return "", "", ErrNoCache
+}
 
 func loadCache(root, id string) (Result, error) {
 	dir, err := listDir(root, id)
 	if err != nil {
 		return Result{}, err
 	}
-	raw, err := os.ReadFile(bodyPath(dir))
+	revID, _, resErr := resolveRevision(dir)
+	if revID == "" {
+		if resErr != nil {
+			return Result{}, resErr
+		}
+		return Result{}, ErrNoCache
+	}
+	res, err := loadRevision(dir, revID)
+	if err != nil {
+		return Result{}, err
+	}
+	return res, resErr
+}
+
+func loadRevision(dir, revID string) (Result, error) {
+	rev := revisionDir(dir, revID)
+	raw, err := os.ReadFile(bodyPath(rev))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Result{}, ErrNoCache
@@ -60,7 +143,7 @@ func loadCache(root, id string) (Result, error) {
 		return Result{}, err
 	}
 	res := Result{Body: raw, SHA256: sha256Hex(raw), Status: StatusLastKnownGood}
-	metaRaw, err := os.ReadFile(metaPath(dir))
+	metaRaw, err := os.ReadFile(metaPath(rev))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return res, nil
@@ -91,16 +174,46 @@ func loadCache(root, id string) (Result, error) {
 	return res, nil
 }
 
-func saveCache(root string, desc Descriptor, body []byte, etag, lastModified, sum string, fetchedAt time.Time) error {
-	dir, err := listDir(root, desc.ID)
+func writeNewFileSync(path string, data []byte, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = f.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	if err := atomicReplace(bodyPath(dir), body); err != nil {
+	if err := f.Sync(); err != nil {
 		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	cleanup = false
+	return atomicfile.SyncDir(filepath.Dir(path))
+}
+
+func defaultWriteRevision(listRoot string, desc Descriptor, body []byte, etag, lastModified, sum string, fetchedAt time.Time, seq uint64) (string, error) {
+	short := sum
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	revID := fmt.Sprintf("rev-%d-%d-%s", fetchedAt.UnixNano(), seq, short)
+	rev := revisionDir(listRoot, revID)
+	if err := os.MkdirAll(rev, 0o700); err != nil {
+		return "", err
+	}
+	if err := writeNewFileSync(bodyPath(rev), body, 0o600); err != nil {
+		return "", err
 	}
 	meta := cacheMeta{
 		ID:           desc.ID,
@@ -114,48 +227,44 @@ func saveCache(root string, desc Descriptor, body []byte, etag, lastModified, su
 	}
 	payload, err := json.Marshal(meta)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return atomicReplace(metaPath(dir), payload)
+	if err := writeNewFileSync(metaPath(rev), payload, 0o600); err != nil {
+		return "", err
+	}
+	_ = atomicfile.SyncDir(rev)
+	return revID, nil
 }
 
-func atomicReplace(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "list-*.tmp")
+func commitPointer(listRoot, active, previous string, w *atomicfile.Writer) error {
+	st := pointerState{Active: active, Previous: previous}
+	payload, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
+	if w == nil {
+		return atomicfile.WriteFile(currentPath(listRoot), payload, 0o600)
+	}
+	return w.WriteFile(currentPath(listRoot), payload, 0o600)
+}
+
+func gcRevisions(listRoot string, keep map[string]struct{}, removeAll func(string) error) {
+	entries, err := os.ReadDir(revisionsDir(listRoot))
+	if err != nil {
+		return
+	}
+	if removeAll == nil {
+		removeAll = os.RemoveAll
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	_ = os.Chmod(tmpName, 0o600)
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(path)
-		if err := os.Rename(tmpName, path); err != nil {
-			return err
+		if _, ok := keep[e.Name()]; ok {
+			continue
 		}
+		_ = removeAll(revisionDir(listRoot, e.Name()))
 	}
-	_ = os.Chmod(path, 0o600)
-	cleanup = false
-	return nil
 }
 
 func sha256Hex(body []byte) string {

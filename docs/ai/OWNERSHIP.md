@@ -2,7 +2,7 @@
 
 Каноническая таблица зон. Детали волн — в `agent-manifest.yml`.
 
-Текущая волна: **R5**. Merge в `main` агентам **не** разрешён.
+Текущая волна: **R5** (prep integrated). R6 не начата.
 
 | Stream | Paths | Notes |
 | --- | --- | --- |
@@ -15,6 +15,7 @@
 | G Web | `web/` | Preact, gzip ≤ 250 KB |
 | H Build | `build.ps1`, `bootstrap.ps1`, `test.ps1`, `package.ps1`, `tools/`, `packaging/**` **кроме** `packaging/init/**` | Windows IPK/ELF + control scripts |
 | I Updater | `src/internal/updater/`, `scripts/install.sh` | GitHub Releases |
+| I Shared atomic | `src/internal/atomicfile/` | control/pointer file replace (R5-I) |
 | J Lab | `lab/`, `lab.ps1`, `.github/workflows/qemu.yml` | QEMU ≠ hardware |
 | K Security | `SECURITY.md`, auth, `security.yml` | redaction, CSRF; R4 auth code is stream A |
 | L Provider | `src/internal/provider/`, `src/internal/news/`, `src/internal/support/`, `src/internal/pairing/` | optional, not core VPN |
@@ -42,4 +43,4 @@
 - `agent-manifest.yml` (исключение: agent O)
 - `go.mod`, `go.sum` — shared freeze; **нельзя добавлять Go-зависимости** без contract gap оркестратора
 
-Неназначенные пакеты (`src/internal/config/`, `connection/`, `diagnostics/` и т.п.) не захватываются молча: только gap + назначение оркестратора.
+Неназначенные пакеты (`src/internal/config/`, `diagnostics/` и т.п.) не захватываются молча: только gap + назначение оркестратора.

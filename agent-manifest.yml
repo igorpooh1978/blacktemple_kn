@@ -7,9 +7,10 @@ waves:
   current: R5
   frozen_contracts: true
   r4_status: integrated
+  r5_status: integrated
   engine_vertical_slice: complete
   merge_authorized: false
-  next_recommended: R5-I after hardware+QEMU evidence (not started)
+  next_recommended: REAL KN-1011 READ-ONLY PROBE (not started); do not start R6
   R4:
     name: Minimal blacktempled + embedded UI + engine vertical slice
     base_sha: 41099b953e8318d2c6115e04521a2f9821627378
@@ -31,23 +32,29 @@ waves:
   R5:
     name: routing DNS geodata remote-data hardware probe QEMU lab
     base_sha: 84cc8ad3f2fb48f98473a49ce1bb0a393f09a1d5
-    merge_authorized: false
+    merge_authorized: true
+    integrated: true
     parallel: true
-    agents: [O, D, E, M, J]
-    not_in_wave: [A, B, C, F, G, H, I, K, L]
+    agents: [O, D, E, M, J, I]
+    not_in_wave: [A, B, C, F, G, H, K, L]
     branches:
       O: agent/r5/orchestration
       D: agent/r5/routing-geodata
       E: agent/r5/remote-data
       M: agent/r5/kn1011-probe
       J: agent/r5/qemu-lab
+      I: agent/r5/integration
     worktrees:
       O: blacktemple_kn-wt/r5-orchestration
       D: blacktemple_kn-wt/r5-routing-geodata
       E: blacktemple_kn-wt/r5-remote-data
       M: blacktemple_kn-wt/r5-kn1011-probe
       J: blacktemple_kn-wt/r5-qemu-lab
-    notes: Do not apply transparent routing. ADR-009 stays UNKNOWN until orchestrator. No geodata in IPK. R5-I not started.
+    notes: >
+      R5 prep integrated. routing planner ready. DNS model ready.
+      geodata lifecycle ready. remote lists ready. remote policy ready.
+      QEMU gate ready. capture engine UNKNOWN. hardware probe NOT RUN.
+      live routing NOT IMPLEMENTED. Transparent routing not applied.
 
 ownership:
   A_go_runtime:
@@ -70,7 +77,8 @@ ownership:
     except: [packaging/init/]
     notes: H owns packaging/** except packaging/init/** (F). Do not edit S99blacktemple-kn.
   I_integration:
-    paths: [src/internal/connection/]
+    paths: [src/internal/connection/, src/internal/atomicfile/]
+    notes: atomicfile is the shared durable pointer primitive introduced in R5-I.
   I_updater:
     paths: [src/internal/updater/, scripts/install.sh]
   J_lab:

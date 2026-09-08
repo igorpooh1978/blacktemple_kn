@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/atomicfile"
 )
 
 // Manager fetches, validates, and atomically caches remote lists.
@@ -21,6 +23,11 @@ type Manager struct {
 
 	guard *Guard
 	mu    sync.Mutex
+	seq   uint64
+
+	pointer       *atomicfile.Writer
+	writeRevision func(listDir string, desc Descriptor, body []byte, etag, lastModified, sum string, fetchedAt time.Time) (string, error)
+	removeAll     func(string) error
 }
 
 // NewManager stores lists under dir. guard may be nil (default DNS/dial).
@@ -34,15 +41,22 @@ func NewManager(dir string, guard *Guard) (*Manager, error) {
 	if guard == nil {
 		guard = &Guard{}
 	}
-	return &Manager{
-		Dir:      dir,
-		Timeout:  defaultFetchTimeout,
-		Attempts: defaultMaxAttempts,
-		Backoff:  DefaultBackoff(),
-		Sleep:    defaultSleep,
-		Now:      time.Now,
-		guard:    guard,
-	}, nil
+	m := &Manager{
+		Dir:       dir,
+		Timeout:   defaultFetchTimeout,
+		Attempts:  defaultMaxAttempts,
+		Backoff:   DefaultBackoff(),
+		Sleep:     defaultSleep,
+		Now:       time.Now,
+		guard:     guard,
+		removeAll: os.RemoveAll,
+	}
+	m.writeRevision = func(listDir string, desc Descriptor, body []byte, etag, lastModified, sum string, fetchedAt time.Time) (string, error) {
+		m.seq++
+		return defaultWriteRevision(listDir, desc, body, etag, lastModified, sum, fetchedAt, m.seq)
+	}
+	recoverAllLists(dir, m.removeAll)
+	return m, nil
 }
 
 func defaultSleep(ctx context.Context, d time.Duration) error {
@@ -177,9 +191,23 @@ func (m *Manager) applyBody(desc Descriptor, out fetchOutcome) (Result, error) {
 		return Result{}, perr
 	}
 	now := m.now()
-	if err := saveCache(m.Dir, desc, out.body, out.etag, out.lastModified, sum, now); err != nil {
+	dir, err := listDir(m.Dir, desc.ID)
+	if err != nil {
 		return Result{}, err
 	}
+	oldActive, _, _ := resolveRevision(dir)
+	revID, err := m.writeRevision(dir, desc, out.body, out.etag, out.lastModified, sum, now)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := commitPointer(dir, revID, oldActive, m.pointer); err != nil {
+		return Result{}, err
+	}
+	keep := map[string]struct{}{revID: {}}
+	if oldActive != "" {
+		keep[oldActive] = struct{}{}
+	}
+	gcRevisions(dir, keep, m.removeAll)
 	return Result{
 		Descriptor:   desc,
 		Status:       StatusUpdated,
@@ -201,7 +229,6 @@ func (m *Manager) finishNotModified(desc Descriptor, cached Result, out fetchOut
 	if sum == "" {
 		sum = sha256Hex(cached.Body)
 	}
-	_ = saveCache(m.Dir, desc, cached.Body, etag, lastMod, sum, now)
 	parsed, perr := Parse(desc.Type, cached.Body)
 	res := Result{
 		Descriptor:   desc,

@@ -14,6 +14,7 @@ var (
 	ErrChecksumMismatch             = errors.New("remote list checksum mismatch")
 	ErrNotModified                  = errors.New("remote list not modified")
 	ErrNoCache                      = errors.New("no last-known-good cache")
+	ErrMissingRevision              = errors.New("remote list active revision is missing")
 	ErrRedirect                     = errors.New("remote list redirect is blocked")
 	ErrTooManyRedirects             = errors.New("too many redirects")
 	ErrTimeout                      = errors.New("remote list fetch timed out")
