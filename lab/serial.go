@@ -75,8 +75,8 @@ func (s *SerialSession) SendLine(line string) error {
 }
 
 // LoginRoot waits for the OpenWrt console and logs in as root.
-// OpenWrt's ash console prints "Please press Enter to activate this console"
-// and does not show "login:" until a newline is sent.
+// OpenWrt 24.x malta often auto-logs in as root after Enter and never prints
+// "login:". Older images still show a login prompt.
 func (s *SerialSession) LoginRoot(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	remain := func() time.Duration {
@@ -87,31 +87,50 @@ func (s *SerialSession) LoginRoot(timeout time.Duration) error {
 		return r
 	}
 	for time.Now().Before(deadline) {
+		buf := s.buf.String()
+		if consoleAutologin(buf) || strings.Contains(buf, "login:") {
+			break
+		}
 		chunk := 2 * time.Second
-		if r := time.Until(deadline); r < chunk {
-			if r <= 0 {
-				break
-			}
+		if r := time.Until(deadline); r > 0 && r < chunk {
 			chunk = r
 		}
-		got, err := s.WaitFor("login:", chunk)
-		if err == nil && strings.Contains(got, "login:") {
-			break
+		_ = s.conn.SetReadDeadline(time.Now().Add(chunk))
+		b := make([]byte, 512)
+		n, err := s.reader.Read(b)
+		if n > 0 {
+			s.buf.Write(b[:n])
+			continue
+		}
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				_ = s.SendLine("")
+				continue
+			}
+			return err
 		}
 		_ = s.SendLine("")
 	}
-	if !strings.Contains(s.buf.String(), "login:") {
-		snippet := s.buf.String()
-		if len(snippet) > 1200 {
-			snippet = snippet[len(snippet)-1200:]
-		}
-		return fmt.Errorf("boot console: serial timeout waiting for %q; last output: %q", "login:", snippet)
+	buf := s.buf.String()
+	if consoleAutologin(buf) {
+		return nil
 	}
-	if err := s.SendLine("root"); err != nil {
+	if strings.Contains(buf, "login:") {
+		if err := s.SendLine("root"); err != nil {
+			return err
+		}
+		_, err := s.WaitFor("#", remain())
 		return err
 	}
-	_, err := s.WaitFor("#", remain())
-	return err
+	snippet := buf
+	if len(snippet) > 1200 {
+		snippet = snippet[len(snippet)-1200:]
+	}
+	return fmt.Errorf("boot console: serial timeout waiting for login or root shell; last output: %q", snippet)
+}
+
+func consoleAutologin(buf string) bool {
+	return strings.Contains(buf, "root@") && strings.Contains(buf, "#")
 }
 
 // Run runs cmd and waits for a shell prompt.

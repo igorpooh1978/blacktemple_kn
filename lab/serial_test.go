@@ -66,3 +66,38 @@ func TestLoginRootPressEnter(t *testing.T) {
 		t.Fatal("console helper did not finish")
 	}
 }
+
+func TestLoginRootAutologin(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("Please press Enter to activate this console\n"))
+		r := bufio.NewReader(conn)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.TrimSpace(line) == "" {
+				_, _ = conn.Write([]byte("\nroot@OpenWrt:~# "))
+				return
+			}
+		}
+	}()
+	sess, err := DialSerial(ln.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.LoginRoot(8 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
