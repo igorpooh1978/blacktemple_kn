@@ -36,6 +36,13 @@ jobs:
           test -z "$(gofmt -l src tools)"
           go vet ./src/... ./tools/...
           go test ./src/... ./tools/...
+      - name: host tools
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p out/bin
+          go build -o out/bin/elfcheck ./tools/elfcheck
+          go build -o out/bin/ipkpack ./tools/ipkpack
       - name: cross-compile mipsle softfloat
         env:
           CGO_ENABLED: "0"
@@ -43,11 +50,9 @@ jobs:
           GOARCH: mipsle
           GOMIPS: softfloat
         run: |
-          mkdir -p out/bin
-          go build -ldflags "-s -w -X main.version=$(cat VERSION | tr -d '\r')" -o out/bin/blacktempled ./src/cmd/blacktempled
-          go build -o out/bin/elfcheck ./tools/elfcheck
-          go build -o out/bin/ipkpack ./tools/ipkpack
-          ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled
+          go build -ldflags "-s -w -X main.version=$(tr -d '\r' < VERSION)" -o out/bin/blacktempled ./src/cmd/blacktempled
+      - name: ELF verify
+        run: ./out/bin/elfcheck -class 32 -endian le -machine mips out/bin/blacktempled
       - name: ipk
         run: |
           mkdir -p out/rootfs/opt/blacktemple-kn/bin out/rootfs/opt/etc/init.d out/control
