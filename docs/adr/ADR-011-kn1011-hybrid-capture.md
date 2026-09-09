@@ -147,7 +147,19 @@ Frozen `contracts/schemas/config.schema.json` `capture.engine` enum remains:
 unspecified | transparent-iptables | xray-tun
 ```
 
-Runtime / ADR name is `hybrid-iptables`. This wave does **not** rewrite the frozen schema. Gap: `.ai/reports/r6-contract-gap-capture-engine.md`. Suggested later mapping: add enum value `hybrid-iptables`, or treat `transparent-iptables` as an alias for this hybrid.
+Mapping (no schema change in R6):
+
+```text
+persisted contract:  capture.engine = transparent-iptables
+runtime implementation: hybrid-iptables
+```
+
+`transparent-iptables` is the engine **family** / user-config value.
+`hybrid-iptables` is the selected KN-1011 implementation (IPv4 TCP REDIRECT + UDP TPROXY).
+
+For Auto / `unspecified`, the runtime selector may choose `hybrid-iptables`.
+
+No new schema enum value is required in R6. This is a documented mapping, not an unresolved contract gap.
 
 ## Consequences
 

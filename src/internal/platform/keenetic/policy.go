@@ -4,7 +4,8 @@ package keenetic
 // ip rule fwmark 0xffffaaa, and /opt/etc/ndm/netfilter.d — not an NDM RPC
 // schema. Do not invent NDM structs here.
 //
-// Invariant: BlackTemple must not grant internet Keenetic already denied.
+// POLICY PRESERVATION: DESIGN INVARIANT / NOT VERIFIED
+// No NDM policy lookup is implemented. First smoke uses an allowed client.
 type PolicyGuard struct{}
 
 // CaptureMayGrantDeniedInternet is always false. A true value would mean

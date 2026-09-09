@@ -44,6 +44,10 @@ func TestInitScriptFailClosedAndEntware(t *testing.T) {
 	if !strings.Contains(text, "wait_network_ready") {
 		t.Fatal("start must wait for network-ready conditions")
 	}
+	calls := strings.Count(text, "wait_network_ready ||")
+	if calls != 1 {
+		t.Fatalf("exactly one wait_network_ready invocation, got %d", calls)
+	}
 	if strings.Contains(text, "sleep 30") {
 		t.Fatal("must not use a fixed sleep 30 as the only wait")
 	}

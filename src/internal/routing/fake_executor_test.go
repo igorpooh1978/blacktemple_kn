@@ -14,19 +14,26 @@ type fakeExecutor struct {
 
 	calls []Argv
 
-	natS     string
-	mangleS  string
-	ipRule   string
-	tableOut string
-	tableErr error
-	ssOut    string
-	ssErr    error
-	pidofOut string
-	pidofErr error
+	natS      string
+	mangleS   string
+	natErr    error
+	mangleErr error
+	ipRule    string
+	ruleErr   error
+	tableOut  string
+	tableErr  error
+	ssOut     string
+	ssErr     error
+	tcpOut    string
+	udpOut    string
+	pidofOut  string
+	pidofErr  error
+	exeByPID  map[int]string
 
-	failAtMut int
-	mutCount  int
-	failErr   error
+	failAtMut  int
+	mutCount   int
+	failErr    error
+	failDetach bool
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -49,6 +56,9 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 
 	if !isProbe(name, args) {
 		f.mutCount++
+		if f.failDetach && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
+			return "", errors.New("fake detach jump failed")
+		}
 		if f.failAtMut > 0 && f.mutCount == f.failAtMut {
 			err := f.failErr
 			if err == nil {
@@ -56,22 +66,35 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 			}
 			return "", err
 		}
+		f.applySuccess(name, args)
 		return "", nil
 	}
 
 	switch {
 	case name == "iptables" && hasSeq(args, "-t", "nat", "-S"):
-		return f.natS, nil
+		return f.natS, f.natErr
 	case name == "iptables" && hasSeq(args, "-t", "mangle", "-S"):
-		return f.mangleS, nil
+		return f.mangleS, f.mangleErr
 	case name == "ip" && hasSeq(args, "-4", "rule", "show"):
-		return f.ipRule, nil
+		return f.ipRule, f.ruleErr
 	case name == "ip" && hasSeq(args, "-4", "route", "show", "table"):
 		return f.tableOut, f.tableErr
 	case name == "ss":
 		return f.ssOut, f.ssErr
+	case name == "cat" && hasToken(args, "/proc/net/tcp"):
+		if f.tcpOut != "" {
+			return f.tcpOut, nil
+		}
+		return f.ssOut, nil
+	case name == "cat" && hasToken(args, "/proc/net/udp"):
+		if f.udpOut != "" {
+			return f.udpOut, nil
+		}
+		return f.ssOut, nil
 	case name == "cat":
 		return f.ssOut, nil
+	case name == "readlink":
+		return f.readlink(args), nil
 	case name == "pidof" && hasSeq(args, "xkeen"):
 		return f.pidofOut, f.pidofErr
 	default:
@@ -87,8 +110,65 @@ func (f *fakeExecutor) snapshot() []Argv {
 	return out
 }
 
+func (f *fakeExecutor) readlink(args []string) string {
+	if len(args) == 0 || f.exeByPID == nil {
+		return ""
+	}
+	p := args[0]
+	const prefix = "/proc/"
+	if !strings.HasPrefix(p, prefix) || !strings.HasSuffix(p, "/exe") {
+		return ""
+	}
+	num := strings.TrimSuffix(strings.TrimPrefix(p, prefix), "/exe")
+	var pid int
+	for _, c := range num {
+		if c < '0' || c > '9' {
+			return ""
+		}
+		pid = pid*10 + int(c-'0')
+	}
+	return f.exeByPID[pid]
+}
+
+func (f *fakeExecutor) applySuccess(name string, args []string) {
+	if hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
+		f.natS = stripJump(f.natS, ChainPRE)
+		f.mangleS = stripJump(f.mangleS, ChainPRE)
+	}
+	if name == "ip" && hasToken(args, "del") && hasToken(args, "fwmark") {
+		f.ipRule = ""
+	}
+	if name == "ip" && hasToken(args, "del") && hasToken(args, "table") {
+		f.tableOut = ""
+		f.tableErr = errors.New("Error: ipv4: FIB table does not exist.")
+	}
+	if name == "iptables" && (hasToken(args, "-X") || hasToken(args, "-F")) {
+		for _, ch := range []string{ChainPRE, ChainTCP, ChainUDP, ChainOUT} {
+			if hasToken(args, ch) {
+				f.natS = strings.ReplaceAll(f.natS, ch, "")
+				f.mangleS = strings.ReplaceAll(f.mangleS, ch, "")
+			}
+		}
+	}
+}
+
+func stripJump(dump, chain string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(dump, "\n") {
+		fields := strings.Fields(line)
+		if hasSeq(fields, "-A", "PREROUTING", "-j", chain) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
 func isProbe(name string, args []string) bool {
-	if name == "ss" || name == "pidof" || name == "cat" {
+	if name == "ss" || name == "pidof" || name == "cat" || name == "readlink" {
 		return true
 	}
 	if name == "iptables" && hasToken(args, "-S") {
@@ -96,34 +176,6 @@ func isProbe(name string, args []string) bool {
 	}
 	if name == "ip" && hasToken(args, "show") {
 		return true
-	}
-	return false
-}
-
-func hasToken(args []string, tok string) bool {
-	for _, a := range args {
-		if a == tok {
-			return true
-		}
-	}
-	return false
-}
-
-func hasSeq(args []string, seq ...string) bool {
-	if len(seq) == 0 || len(args) < len(seq) {
-		return false
-	}
-	for i := 0; i <= len(args)-len(seq); i++ {
-		ok := true
-		for j := range seq {
-			if args[i+j] != seq[j] {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return true
-		}
 	}
 	return false
 }

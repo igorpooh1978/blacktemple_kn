@@ -9,7 +9,7 @@ import (
 )
 
 func TestStartTransparentPortInUse(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,13 +44,13 @@ func TestStartTransparentRejectsXKeenPort(t *testing.T) {
 }
 
 func TestTransparentPortInUseUDP(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := net.ListenPacket("udp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pc.Close()
 	port := pc.LocalAddr().(*net.UDPAddr).Port
-	if !transparentPortInUse("127.0.0.1", port) {
+	if !transparentPortInUse("0.0.0.0", port) {
 		t.Fatal("expected UDP occupancy to be detected")
 	}
 }

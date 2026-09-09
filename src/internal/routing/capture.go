@@ -34,7 +34,39 @@ var (
 	ErrExistingCaptureEngine = errors.New("routing: existing capture engine")
 	ErrCaptureCollision      = errors.New("routing: capture collision")
 	ErrNilExecutor           = errors.New("routing: nil executor")
+	ErrCleanupIncomplete     = errors.New("routing: BTKN cleanup incomplete")
+	ErrPreflightProbe        = errors.New("routing: preflight probe failed")
 )
+
+// OurXrayExecutable is the only process allowed to own capture port 11820.
+const OurXrayExecutable = "/opt/blacktemple-kn/bin/xray"
+
+// ExpectedListener is the supervisor-known BlackTemple Xray identity.
+type ExpectedListener struct {
+	Executable string
+	PID        int
+}
+
+// CaptureRequirements is the single source of required hybrid capabilities.
+// Platform Detect/Prepare must use this; do not maintain a second list.
+type CaptureRequirements struct {
+	UserlandTools     []string
+	IptablesTargets   []string
+	IptablesMatches   []string
+	NeedIPSet         bool
+	NeedPolicyRouting bool
+}
+
+// HybridRequirements describes what HybridIptablesEngine actually uses.
+func HybridRequirements() CaptureRequirements {
+	return CaptureRequirements{
+		UserlandTools:     []string{"ip", "iptables", "ipset"},
+		IptablesTargets:   []string{"REDIRECT", "TPROXY", "MARK", "CONNMARK"},
+		IptablesMatches:   []string{"socket", "set", "addrtype", "conntrack"},
+		NeedIPSet:         true,
+		NeedPolicyRouting: true,
+	}
+}
 
 // Argv is one exec.Command invocation: name plus args, never a shell line.
 type Argv struct {
@@ -83,6 +115,8 @@ type TrafficCaptureEngine interface {
 	Preflight(ctx context.Context) (PreflightReport, error)
 	Apply(ctx context.Context) error
 	Remove(ctx context.Context) error
+	Reconcile(ctx context.Context, desired bool) error
+	FailOpen(ctx context.Context) error
 }
 
 // Executor runs a fixed argv. Implementations must not invoke a shell.

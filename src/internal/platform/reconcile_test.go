@@ -35,7 +35,7 @@ func TestReconcileManagerMissingNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 	})
-	if r.Decision != DecisionNoCapture {
+	if r.Decision != DecisionDesiredAbsent {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 	if r.Reason != "manager-missing" {
@@ -56,7 +56,7 @@ func TestReconcileXrayMissingNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "xray-missing" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-missing" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -71,7 +71,7 @@ func TestReconcileXrayDeadNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "xray-dead" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -86,7 +86,7 @@ func TestReconcileStateCorruptNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{not-json`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "state-corrupt" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -101,7 +101,7 @@ func TestReconcileUnknownStateNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"WAT"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "state-corrupt" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -116,7 +116,7 @@ func TestReconcileConfigCorruptNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{`),
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "config-corrupt" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "config-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -131,7 +131,7 @@ func TestReconcileNetworkNotReadyNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "network-not-ready" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "network-not-ready" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -157,6 +157,21 @@ func TestReconcileReadyDoesNotCaptureOUTPUTOrCallIptables(t *testing.T) {
 	}
 }
 
+func TestReconcileBackoffDesiredAbsent(t *testing.T) {
+	dir := t.TempDir()
+	r := Reconcile(ReconcileInput{
+		ManagerPath: writeExec(t, dir, "blacktempled"),
+		XrayPath:    writeExec(t, dir, "xray"),
+		Network:     readyNet(),
+		Alive:       func() bool { return true },
+		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:   []byte(`{"state":"BACKOFF"}`),
+	})
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
+		t.Fatalf("BACKOFF must desire capture absent: %s %s", r.Decision, r.Reason)
+	}
+}
+
 func TestReconcileStoppedStateNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
@@ -167,7 +182,7 @@ func TestReconcileStoppedStateNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StateJSON:   []byte(`{"state":"STOPPED"}`),
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "xray-dead" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -183,7 +198,7 @@ func TestReconcileStatePathCorruptNoCapture(t *testing.T) {
 		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
 		StatePath:   p,
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "state-corrupt" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }
@@ -228,7 +243,7 @@ func TestReconcilePolicyGrantDeniedIsFailOpen(t *testing.T) {
 		StateJSON:   []byte(`{"state":"RUNNING"}`),
 		Policy:      grantDenied{},
 	})
-	if r.Decision != DecisionNoCapture || r.Reason != "keenetic-deny" {
+	if r.Decision != DecisionDesiredAbsent || r.Reason != "keenetic-deny" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
 	}
 }

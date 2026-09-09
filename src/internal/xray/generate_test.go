@@ -257,6 +257,7 @@ func TestTransparentTCPAndUDPInbound(t *testing.T) {
 			Protocol string `json:"protocol"`
 			Settings struct {
 				Network        string `json:"network"`
+				AllowedNetwork string `json:"allowedNetwork"`
 				FollowRedirect bool   `json:"followRedirect"`
 				Auth           string `json:"auth"`
 				UDP            bool   `json:"udp"`
@@ -271,8 +272,8 @@ func TestTransparentTCPAndUDPInbound(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Inbounds) != 2 {
-		t.Fatalf("inbounds=%d want 2 (socks + dokodemo)", len(cfg.Inbounds))
+	if len(cfg.Inbounds) != 3 {
+		t.Fatalf("inbounds=%d want 3 (socks + redirect-in + tproxy-in)", len(cfg.Inbounds))
 	}
 	socks := cfg.Inbounds[0]
 	if socks.Protocol != "socks" || socks.Listen != "127.0.0.1" || socks.Port != 11080 {
@@ -281,27 +282,61 @@ func TestTransparentTCPAndUDPInbound(t *testing.T) {
 	if socks.Settings.Auth != "noauth" || !socks.Settings.UDP {
 		t.Fatalf("socks settings changed: %+v", socks.Settings)
 	}
-	tr := cfg.Inbounds[1]
-	if tr.Tag != "transparent-in" || tr.Protocol != "dokodemo-door" {
-		t.Fatalf("transparent inbound: %+v", tr)
+	tcp := cfg.Inbounds[1]
+	if tcp.Tag != "redirect-in" || tcp.Protocol != "tunnel" {
+		t.Fatalf("TCP inbound: %+v", tcp)
 	}
-	if tr.Listen != "127.0.0.1" || tr.Port != DefaultTransparentPort {
-		t.Fatalf("transparent listen %s:%d", tr.Listen, tr.Port)
+	if tcp.Listen != "0.0.0.0" || tcp.Port != DefaultTransparentPort {
+		t.Fatalf("TCP listen %s:%d", tcp.Listen, tcp.Port)
 	}
-	if tr.Port == 1181 {
+	if tcp.Port == 1181 {
 		t.Fatal("transparent port must never be 1181")
 	}
-	if tr.Settings.Network != "tcp,udp" {
-		t.Fatalf("network=%q want tcp,udp", tr.Settings.Network)
+	if tcp.Settings.AllowedNetwork != "tcp" {
+		t.Fatalf("TCP allowedNetwork=%q", tcp.Settings.AllowedNetwork)
 	}
-	if !strings.Contains(tr.Settings.Network, "tcp") || !strings.Contains(tr.Settings.Network, "udp") {
-		t.Fatalf("TCP+UDP inbound missing: %q", tr.Settings.Network)
+	if !tcp.Settings.FollowRedirect {
+		t.Fatal("TCP followRedirect must be true")
 	}
-	if !tr.Settings.FollowRedirect {
-		t.Fatal("followRedirect must be true")
+	if tcp.StreamSettings != nil && tcp.StreamSettings.Sockopt.TProxy == "tproxy" {
+		t.Fatal("TCP REDIRECT inbound must not set sockopt.tproxy=tproxy")
 	}
-	if tr.StreamSettings == nil || tr.StreamSettings.Sockopt.TProxy != "tproxy" {
-		t.Fatalf("sockopt.tproxy: %+v", tr.StreamSettings)
+	udp := cfg.Inbounds[2]
+	if udp.Tag != "tproxy-in" || udp.Protocol != "tunnel" {
+		t.Fatalf("UDP inbound: %+v", udp)
+	}
+	if udp.Listen != "0.0.0.0" || udp.Port != DefaultTransparentPort {
+		t.Fatalf("UDP listen %s:%d", udp.Listen, udp.Port)
+	}
+	if udp.Settings.AllowedNetwork != "udp" {
+		t.Fatalf("UDP allowedNetwork=%q", udp.Settings.AllowedNetwork)
+	}
+	if !udp.Settings.FollowRedirect {
+		t.Fatal("UDP followRedirect must be true")
+	}
+	if udp.StreamSettings == nil || udp.StreamSettings.Sockopt.TProxy != "tproxy" {
+		t.Fatalf("UDP sockopt.tproxy: %+v", udp.StreamSettings)
+	}
+}
+
+func TestDirect11820IsNotForwardProxy(t *testing.T) {
+	raw, err := Generate(fixtureProfile("tcp", "tls"), fixtureSecrets(), fixtureParams("tcp"), Options{Transparent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"port":11820`)) && bytes.Contains(raw, []byte(`"protocol":"socks"`)) {
+		if bytes.Count(raw, []byte(`"protocol":"socks"`)) != 1 {
+			t.Fatal("SOCKS must remain only on 11080, not on 11820")
+		}
+	}
+	if bytes.Contains(raw, []byte(`"protocol":"http"`)) {
+		t.Fatal("must not expose HTTP inbound")
+	}
+	if !bytes.Contains(raw, []byte(`"followRedirect":true`)) {
+		t.Fatal("tunnel inbounds require followRedirect (original dest), not a general forward proxy")
+	}
+	if bytes.Contains(raw, []byte(`"tag":"redirect-in"`)) && bytes.Contains(raw, []byte(`"protocol":"socks"`)) {
+		// socks is first inbound only
 	}
 }
 
@@ -362,7 +397,7 @@ func TestSocksGoldensHaveNoTransparentInbound(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(raw, []byte("dokodemo-door")) || bytes.Contains(raw, []byte("11820")) {
+		if bytes.Contains(raw, []byte("dokodemo-door")) || bytes.Contains(raw, []byte("11820")) || bytes.Contains(raw, []byte("redirect-in")) {
 			t.Fatalf("%s unexpectedly contains transparent inbound", path)
 		}
 	}

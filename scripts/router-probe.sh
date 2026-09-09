@@ -916,6 +916,49 @@ if [ "$_saw_xray" -eq 0 ]; then
 	echo "no comm=xray processes"
 fi
 
+# ----- PACKAGE-PROVENANCE -----
+section "PACKAGE-PROVENANCE"
+echo "read-only opkg status/files/search only; never update/install/remove"
+if have opkg; then
+	for _pkg in ip-full iptables ipset ca-bundle; do
+		echo "--- opkg status ${_pkg} ---"
+		opkg status "$_pkg" 2>&1 | redact || echo "NOT AVAILABLE: ${_pkg}"
+		echo "--- opkg files ${_pkg} ---"
+		opkg files "$_pkg" 2>&1 | redact || echo "NOT AVAILABLE: files ${_pkg}"
+	done
+	for _p in /opt/sbin/ip /opt/sbin/iptables /opt/sbin/ipset /opt/bin/ip /opt/bin/iptables /opt/bin/ipset; do
+		echo "--- opkg search ${_p} ---"
+		if [ -e "$_p" ]; then
+			opkg search "$_p" 2>&1 | redact || echo "NOT AVAILABLE: search ${_p}"
+		else
+			echo "NOT AVAILABLE: ${_p}"
+		fi
+	done
+else
+	echo "NOT AVAILABLE: opkg"
+fi
+echo "NOTE: ca-bundle listed for provenance only. BlackTemple Go TLS does not depend on system CA bundle."
+
+# ----- MODULE-PROVENANCE -----
+section "MODULE-PROVENANCE"
+_kver=$(uname -r 2>/dev/null)
+echo "uname -r: ${_kver:-UNKNOWN}"
+echo "search roots only: /lib/modules/\$kver /lib/system-modules/\$kver /opt/lib/modules /opt/lib/system-modules/\$kver"
+for _root in "/lib/modules/${_kver}" "/lib/system-modules/${_kver}" "/opt/lib/modules" "/opt/lib/system-modules/${_kver}"; do
+	echo "--- ${_root} ---"
+	if [ -d "$_root" ]; then
+		ls -l "$_root" 2>&1 | redact | grep -i -e tproxy -e socket -e mark -e connmark -e redirect -e xt_set -e addrtype -e conntrack || echo "(no matching module files in this root)"
+	else
+		echo "NOT AVAILABLE: ${_root}"
+	fi
+done
+echo "loaded capture-related modules (from /proc/modules; not an install):"
+if [ -r /proc/modules ]; then
+	grep -i -e tproxy -e redirect -e 'xt_mark' -e connmark -e xt_socket -e xt_set -e addrtype -e conntrack /proc/modules 2>/dev/null | redact || echo "no matching loaded modules"
+else
+	echo "NOT AVAILABLE: /proc/modules"
+fi
+
 # ----- SUMMARY -----
 section "SUMMARY"
 _swap_present="NO"

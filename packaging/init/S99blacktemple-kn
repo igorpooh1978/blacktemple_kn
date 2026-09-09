@@ -104,7 +104,6 @@ do_start() {
 		echo "already running"
 		return 0
 	fi
-	wait_network_ready || true
 	rm -f "$PIDFILE"
 	"$BIN" $ARGS >>"$LOGFILE" 2>&1 &
 	echo $! >"$PIDFILE"

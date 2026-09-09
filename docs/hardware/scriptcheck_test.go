@@ -94,7 +94,7 @@ func TestProbeScriptReadOnly(t *testing.T) {
 		regexp.MustCompile(`(?m)(^|[[:space:];|&])killall[[:space:]]`),
 		regexp.MustCompile(`\bswapon\b`),
 		regexp.MustCompile(`\bswapoff\b`),
-		regexp.MustCompile(`opkg[[:space:]]+(install|remove|upgrade)\b`),
+		regexp.MustCompile(`opkg[[:space:]]+(install|remove|upgrade|update)\b`),
 		regexp.MustCompile(`service[[:space:]]+restart\b`),
 		regexp.MustCompile(`/etc/init\.d/\S+[[:space:]]+restart\b`),
 		regexp.MustCompile(`xkeen[[:space:]]+-(dns|pbr|pr|ipv6)\b`),
@@ -122,7 +122,7 @@ func TestProbeScriptSections(t *testing.T) {
 	sections := []string{
 		"SYSTEM", "CPU", "MEMORY", "SWAP", "ZRAM", "CGROUP", "FILESYSTEM", "ENTWARE", "TOOLS",
 		"NETWORK", "ROUTING", "FIREWALL", "IPTABLES", "IP6TABLES", "TARGETS", "IPSET",
-		"TUN", "KERNEL", "MODULES", "DNS", "XRAY", "XKEEN", "INIT", "LIMITS", "SOCKETS",
+		"TUN", "KERNEL", "MODULES", "PACKAGE-PROVENANCE", "MODULE-PROVENANCE", "DNS", "XRAY", "XKEEN", "INIT", "LIMITS", "SOCKETS",
 		"BASELINE", "SUMMARY",
 	}
 	if !strings.Contains(s, `echo "===== $1 ====="`) {

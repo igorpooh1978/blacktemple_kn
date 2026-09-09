@@ -1,5 +1,7 @@
 #!/bin/sh
-# Gated KN-1011 IPv4 hybrid routing smoke (mutating). Not the production daemon.
+# Gated KN-1011 IPv4 KERNEL_MUTATION_HARNESS (not production D/C/F, not app smoke).
+# Port/mark/table here are harness-only (1182 / 0xb101 / 1011), not 11820 / 0x42544b4e / 4254.
+# This script cannot set blackTempleHardwareSmoke=PASS.
 # Production blacktempled never stops XKeen. Only this harness may, and only when
 # both BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1 are set.
 #
@@ -124,32 +126,54 @@ stop_xkeen_temp() {
 		echo "NOT AVAILABLE: ${XKEEN_INIT}"
 		return 0
 	fi
-	"$XKEEN_INIT" stop 2>&1 || true
+	if ! "$XKEEN_INIT" stop 2>&1; then
+		echo "FAIL: XKeen stop"
+		return 1
+	fi
 }
 
 cmd_apply() {
-	echo "===== APPLY BTKN IPv4 HYBRID (limited TEST-NET) ====="
+	echo "===== APPLY KERNEL_MUTATION_HARNESS (NOT BlackTemple app smoke) ====="
+	echo "KERNEL_MUTATION_HARNESS: port ${BTKN_PORT} mark ${BTKN_MARK} table ${BTKN_TABLE}"
 	echo "scope: ${BTKN_TEST_DST} only; not all traffic through VPN"
 	echo "IPv4 hybrid: TCP REDIRECT + UDP TPROXY (orchestrator SELECTED; not TPROXY SUPPORTED)"
 	echo "IPv6: unchanged"
+	echo "blackTempleHardwareSmoke: NOT APPLICABLE (this is KERNEL_MUTATION_HARNESS)"
 	if ! have iptables; then
-		echo "NOT AVAILABLE: iptables"
+		echo "FAIL: iptables missing"
 		return 1
 	fi
 	iptables -t nat -N BTKN_NAT 2>/dev/null || true
 	iptables -t mangle -N BTKN_MANGLE 2>/dev/null || true
-	iptables -t nat -A BTKN_NAT -p tcp -d "$BTKN_TEST_DST" -m comment --comment BTKN_smoke -j REDIRECT --to-ports "$BTKN_PORT"
-	if have iptables; then
-		iptables -t mangle -A BTKN_MANGLE -p udp -d "$BTKN_TEST_DST" -m comment --comment BTKN_smoke -j TPROXY --on-port "$BTKN_PORT" --on-ip 127.0.0.1 --tproxy-mark "${BTKN_MARK}/0xffffffff" 2>/dev/null \
-			|| echo "TPROXY apply: NOT OBSERVED (not SUPPORTED)"
+	if ! iptables -t nat -A BTKN_NAT -p tcp -d "$BTKN_TEST_DST" -m comment --comment BTKN_smoke -j REDIRECT --to-ports "$BTKN_PORT"; then
+		echo "FAIL: REDIRECT"
+		return 1
 	fi
-	iptables -t nat -C PREROUTING -j BTKN_NAT 2>/dev/null || iptables -t nat -A PREROUTING -j BTKN_NAT
-	iptables -t mangle -C PREROUTING -j BTKN_MANGLE 2>/dev/null || iptables -t mangle -A PREROUTING -j BTKN_MANGLE
-	if have ip; then
-		ip rule add fwmark "$BTKN_MARK" lookup "$BTKN_TABLE" 2>/dev/null || true
-		ip route add local default dev lo table "$BTKN_TABLE" 2>/dev/null || true
+	if ! iptables -t mangle -A BTKN_MANGLE -p udp -d "$BTKN_TEST_DST" -m comment --comment BTKN_smoke -j TPROXY --on-port "$BTKN_PORT" --on-ip 127.0.0.1 --tproxy-mark "${BTKN_MARK}/0xffffffff"; then
+		echo "FAIL: TPROXY"
+		return 1
 	fi
-	echo "apply: BTKN_ limited hybrid installed (IPv4 TEST-NET only)"
+	iptables -t nat -C PREROUTING -j BTKN_NAT 2>/dev/null || iptables -t nat -A PREROUTING -j BTKN_NAT || {
+		echo "FAIL: REDIRECT jump"
+		return 1
+	}
+	iptables -t mangle -C PREROUTING -j BTKN_MANGLE 2>/dev/null || iptables -t mangle -A PREROUTING -j BTKN_MANGLE || {
+		echo "FAIL: TPROXY jump"
+		return 1
+	}
+	if ! have ip; then
+		echo "FAIL: ip missing"
+		return 1
+	fi
+	if ! ip rule add fwmark "$BTKN_MARK" lookup "$BTKN_TABLE"; then
+		echo "FAIL: ip rule"
+		return 1
+	fi
+	if ! ip route add local default dev lo table "$BTKN_TABLE"; then
+		echo "FAIL: ip route"
+		return 1
+	fi
+	echo "apply: KERNEL_MUTATION_HARNESS installed (IPv4 TEST-NET only)"
 }
 
 delete_jumps_to_btkn() {
@@ -209,10 +233,13 @@ cmd_restore_xkeen() {
 		_was=$(awk -F= '/^xkeen_was_running=/ { print $2; exit }' "$SNAP_FILE" 2>/dev/null)
 	fi
 	if [ "${_was}" = "1" ]; then
-		if [ -x "$XKEEN_INIT" ]; then
-			"$XKEEN_INIT" start 2>&1 || true
-		else
-			echo "NOT AVAILABLE: ${XKEEN_INIT}"
+		if [ ! -x "$XKEEN_INIT" ]; then
+			echo "FAIL: XKeen restore (init missing)"
+			return 1
+		fi
+		if ! "$XKEEN_INIT" start 2>&1; then
+			echo "FAIL: XKeen restore"
+			return 1
 		fi
 	else
 		echo "xkeen was not running at snapshot; not started"
@@ -251,10 +278,12 @@ if [ -z "$_cmd" ]; then
 fi
 case "$_cmd" in
 	run)
+		echo "KERNEL_MUTATION_HARNESS"
+		echo "blackTempleHardwareSmoke: NOT APPLICABLE"
 		cmd_snapshot
 		trap 'cmd_cleanup_btkn; cmd_stop_blacktemple; cmd_restore_xkeen; cmd_verify; trap - EXIT' EXIT
-		stop_xkeen_temp
-		cmd_apply
+		stop_xkeen_temp || exit 1
+		cmd_apply || exit 1
 		cmd_verify
 		;;
 	snapshot) cmd_snapshot ;;

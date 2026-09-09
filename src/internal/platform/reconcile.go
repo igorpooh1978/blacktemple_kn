@@ -14,12 +14,15 @@ import (
 type CaptureDecision string
 
 const (
-	// DecisionNoCapture: do not install capture (fail-open no-op).
-	DecisionNoCapture CaptureDecision = "no-capture"
-	// DecisionRemove: stop contract — D must remove only BTKN_ rules.
-	DecisionRemove CaptureDecision = "remove"
-	// DecisionReady: conditions OK for D to Apply later. F still emits no iptables.
-	DecisionReady CaptureDecision = "ready"
+	// DecisionDesiredAbsent: capture must not be installed. Integrator calls D.Remove().
+	DecisionDesiredAbsent CaptureDecision = "desired-absent"
+	// DecisionDesiredPresent: conditions OK for D to Apply after Xray owns 11820.
+	DecisionDesiredPresent CaptureDecision = "desired-present"
+
+	// Aliases kept for older comments; prefer DesiredAbsent/Present.
+	DecisionNoCapture = DecisionDesiredAbsent
+	DecisionRemove    = DecisionDesiredAbsent
+	DecisionReady     = DecisionDesiredPresent
 )
 
 // RuntimeStateRunning matches supervisor.StateRunning. Duplicated so platform
@@ -69,12 +72,14 @@ func BTKNRemoveArgv(manager string) []string {
 
 // Reconcile decides whether capture may be installed. Default is fail-open.
 //
-// Fail-open (DecisionNoCapture) when: manager missing, xray missing, xray
+// Fail-open (DecisionDesiredAbsent) when: manager missing, xray missing, xray
 // dead, runtime state invalid/corrupt, config corrupt, network not ready, or
-// a policy guard would grant Keenetic-denied internet.
+// a policy guard would grant Keenetic-denied internet. DesiredAbsent means
+// capture must be removed by D; it is not a no-op. Manager-missing cannot
+// itself delete stale BTKN (binary gone).
 //
-// Stop always returns DecisionRemove (command contract). Existing BTKN_
-// teardown is D.Remove(); F does not call iptables.
+// Stop also returns DecisionDesiredAbsent. Existing BTKN_ teardown is
+// D.Remove(); F does not call iptables.
 //
 // CaptureOUTPUT is always false: router self-generated traffic is DIRECT.
 func Reconcile(in ReconcileInput) ReconcileResult {
@@ -88,7 +93,7 @@ func Reconcile(in ReconcileInput) ReconcileResult {
 	}
 
 	out := ReconcileResult{
-		Decision:      DecisionNoCapture,
+		Decision:      DecisionDesiredAbsent,
 		ChainPrefix:   ChainPrefix,
 		CaptureOUTPUT: false,
 		RemoveArgv:    BTKNRemoveArgv(manager),
@@ -137,7 +142,7 @@ func Reconcile(in ReconcileInput) ReconcileResult {
 		return out
 	}
 
-	out.Decision = DecisionReady
+	out.Decision = DecisionDesiredPresent
 	out.Reason = "ready"
 	return out
 }

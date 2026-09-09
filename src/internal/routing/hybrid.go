@@ -2,8 +2,10 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"sync"
 )
 
@@ -22,11 +24,12 @@ var _ TrafficCaptureEngine = (*HybridIptablesEngine)(nil)
 //
 // IPv6 capture is UNVERIFIED and is not enabled.
 type HybridIptablesEngine struct {
-	mu      sync.Mutex
-	client  netip.Addr
-	exec    Executor
-	guard   KeeneticPolicyGuard
-	applied bool
+	mu       sync.Mutex
+	client   netip.Addr
+	exec     Executor
+	guard    KeeneticPolicyGuard
+	applied  bool
+	expected ExpectedListener
 }
 
 // NewHybridIptablesEngine builds an IPv4 hybrid engine. exec must be non-nil.
@@ -43,7 +46,21 @@ func NewHybridIptablesEngine(client netip.Addr, exec Executor, guard KeeneticPol
 		client: client,
 		exec:   exec,
 		guard:  guard,
+		expected: ExpectedListener{
+			Executable: OurXrayExecutable,
+		},
 	}, nil
+}
+
+// SetExpectedListener records the supervisor-owned Xray identity.
+// Port 11820 belonging to this executable is not a capture collision.
+func (e *HybridIptablesEngine) SetExpectedListener(l ExpectedListener) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if l.Executable == "" {
+		l.Executable = OurXrayExecutable
+	}
+	e.expected = l
 }
 
 func (e *HybridIptablesEngine) validateClient() error {
@@ -103,7 +120,9 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 
 	for _, c := range e.installCommands() {
 		if _, err := e.exec.Run(ctx, c.Name, c.Args...); err != nil {
-			_ = e.Remove(ctx)
+			if rbErr := e.Remove(ctx); rbErr != nil {
+				return errors.Join(err, rbErr)
+			}
 			return err
 		}
 	}
@@ -114,21 +133,174 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	return nil
 }
 
-// Remove uninstalls BTKN hooks so selected clients return DIRECT.
-// Missing objects are ignored; calling twice is safe.
+// Remove uninstalls owned BTKN hooks and verifies capture is detached.
+// Missing owned objects are OK. Residual capture hooks return ErrCleanupIncomplete.
 func (e *HybridIptablesEngine) Remove(ctx context.Context) error {
+	var first error
 	for _, c := range e.removeCommands() {
-		_, _ = e.exec.Run(ctx, c.Name, c.Args...)
+		if _, err := e.exec.Run(ctx, c.Name, c.Args...); err != nil && !isAbsentObjectError(err) {
+			if first == nil {
+				first = err
+			} else {
+				first = errors.Join(first, err)
+			}
+		}
+	}
+	if err := e.verifyRemoved(ctx); err != nil {
+		e.mu.Lock()
+		e.applied = false
+		e.mu.Unlock()
+		if first != nil {
+			return errors.Join(fmt.Errorf("%w", ErrCleanupIncomplete), first, err)
+		}
+		return err
 	}
 	e.mu.Lock()
 	e.applied = false
 	e.mu.Unlock()
+	if first != nil {
+		return fmt.Errorf("%w: %v", ErrCleanupIncomplete, first)
+	}
 	return nil
 }
 
+// Reconcile is the manager-restart path: never adopt unknown partial BTKN.
+// Always RemoveOwned then Apply fresh if desired. Fail-open DIRECT gap is OK.
+func (e *HybridIptablesEngine) Reconcile(ctx context.Context, desired bool) error {
+	e.mu.Lock()
+	e.applied = false
+	e.mu.Unlock()
+	if err := e.Remove(ctx); err != nil {
+		return err
+	}
+	if !desired {
+		return nil
+	}
+	return e.Apply(ctx)
+}
+
 // FailOpen uninstalls BTKN hooks so the selected client returns DIRECT.
-// Call this when Xray would crash or BACKOFF. This package must not import
-// supervisor or src/internal/xray; those layers invoke this method.
 func (e *HybridIptablesEngine) FailOpen(ctx context.Context) error {
 	return e.Remove(ctx)
+}
+
+func (e *HybridIptablesEngine) verifyRemoved(ctx context.Context) error {
+	natS, err := e.exec.Run(ctx, "iptables", "-t", "nat", "-S")
+	if err != nil {
+		return fmt.Errorf("%w: verify nat -S: %v", ErrCleanupIncomplete, err)
+	}
+	mangleS, err := e.exec.Run(ctx, "iptables", "-t", "mangle", "-S")
+	if err != nil {
+		return fmt.Errorf("%w: verify mangle -S: %v", ErrCleanupIncomplete, err)
+	}
+	rules, err := e.exec.Run(ctx, "ip", "-4", "rule", "show")
+	if err != nil {
+		return fmt.Errorf("%w: verify ip rule: %v", ErrCleanupIncomplete, err)
+	}
+	tableOut, tableErr := e.exec.Run(ctx, "ip", "-4", "route", "show", "table", fmt.Sprintf("%d", RouteTable))
+	if jumpPresent(natS, "PREROUTING", ChainPRE) || jumpPresent(mangleS, "PREROUTING", ChainPRE) {
+		return fmt.Errorf("%w: PREROUTING still jumps to %s", ErrCleanupIncomplete, ChainPRE)
+	}
+	if ownedMarkRulePresent(rules) {
+		return fmt.Errorf("%w: fwmark 0x42544b4e -> table 4254 still present", ErrCleanupIncomplete)
+	}
+	if tableStillPresent(tableOut, tableErr) {
+		return fmt.Errorf("%w: table 4254 local default still present", ErrCleanupIncomplete)
+	}
+	return nil
+}
+
+func jumpPresent(tableS, chain, jump string) bool {
+	for _, line := range strings.Split(tableS, "\n") {
+		fields := strings.Fields(line)
+		if hasSeq(fields, "-A", chain, "-j", jump) {
+			return true
+		}
+	}
+	return false
+}
+
+func ownedMarkRulePresent(rules string) bool {
+	lower := strings.ToLower(rules)
+	return strings.Contains(lower, "0x42544b4e") && strings.Contains(rules, "4254")
+}
+
+func tableStillPresent(out string, err error) bool {
+	if isTableAbsent(out, err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+func isTableAbsent(out string, err error) bool {
+	msg := strings.ToLower(strings.TrimSpace(out))
+	if err != nil {
+		msg = strings.ToLower(err.Error() + " " + msg)
+	}
+	for _, tok := range []string{
+		"does not exist",
+		"no such file",
+		"fib table does not exist",
+		"no such process",
+		"can't find table",
+		"cannot find device",
+	} {
+		if strings.Contains(msg, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAbsentObjectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, tok := range []string{
+		"does not exist",
+		"no such file",
+		"no chain/target/match",
+		"bad rule",
+		"no matching rule",
+		"the set with the given name does not exist",
+		"set not found",
+		"fib table does not exist",
+	} {
+		if strings.Contains(msg, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasToken(args []string, tok string) bool {
+	for _, a := range args {
+		if a == tok {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSeq(args []string, seq ...string) bool {
+	if len(seq) == 0 || len(args) < len(seq) {
+		return false
+	}
+	for i := 0; i <= len(args)-len(seq); i++ {
+		ok := true
+		for j := range seq {
+			if args[i+j] != seq[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }

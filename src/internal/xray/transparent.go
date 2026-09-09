@@ -8,8 +8,8 @@ import (
 	"strconv"
 )
 
-// DefaultTransparentPort is the dokodemo-door listen port for iptables
-// REDIRECT/TPROXY. It is not 1181 (live XKeen).
+// DefaultTransparentPort is the hybrid tunnel listen port for iptables
+// REDIRECT (TCP) and TPROXY (UDP). It is not 1181 (live XKeen).
 const DefaultTransparentPort = 11820
 
 // ErrTransparentPortInUse is returned when the transparent inbound port is
@@ -60,7 +60,7 @@ func (r *Runner) StartTransparent(ctx context.Context, configPath string, port i
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("transparent listen port must be 1-65535")
 	}
-	if transparentPortInUse(defaultListenHost, port) {
+	if transparentPortInUse(transparentListen, port) {
 		return ErrTransparentPortInUse
 	}
 	return r.Start(ctx, configPath)

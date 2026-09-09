@@ -1,17 +1,17 @@
 package protocols
 
-// HybridTransparentInbound is the R6 dokodemo-door inbound for iptables
-// REDIRECT (TCP) and TPROXY (UDP). It is generated JSON only — not SUPPORTED
+// HybridTransparentInbound is the R6 tunnel inbound pair for iptables
+// REDIRECT (TCP) and TPROXY (UDP). Generated JSON only — not SUPPORTED
 // until KN-1011 hardware Apply PASS.
 func HybridTransparentInbound() Combination {
 	return Combination{
-		Protocol:  "dokodemo-door",
-		Transport: "tcp,udp",
+		Protocol:  "tunnel",
+		Transport: "tcp+udp",
 		Security:  "followRedirect",
 		Generated: true,
 		XrayTest:  StatusNotRun,
 		QEMU:      StatusNotRun,
 		Hardware:  StatusNotRun,
-		Notes:     "Hybrid transparent inbound listen 127.0.0.1:11820 (never 1181). sockopt.tproxy=tproxy. Do not treat as SUPPORTED until KN-1011 hardware PASS.",
+		Notes:     "Two inbounds on 0.0.0.0:11820 (never 1181): redirect-in TCP without tproxy sockopt; tproxy-in UDP with sockopt.tproxy=tproxy. Direct :11820 is not a forward proxy. Do not treat as SUPPORTED until KN-1011 hardware PASS.",
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -138,8 +139,11 @@ func TestUDPTProxyPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", "127.0.0.1", "--on-port", "11820", "--tproxy-mark", "0x42544b4e/0xffffffff") {
 		t.Fatal("UDP TPROXY missing")
 	}
-	if !planHasSeq(p.Install, "-p", "udp", "-m", "socket", "--transparent", "-j", "RETURN") {
-		t.Fatal("socket-transparent guard missing")
+	if planHasSeq(p.Install, "-p", "udp", "-m", "socket", "--transparent", "-j", "RETURN") {
+		t.Fatal("socket --transparent must MARK, not RETURN without mark")
+	}
+	if !planHasSeq(p.Install, "-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-xmark", "0x42544b4e/0xffffffff") {
+		t.Fatal("socket-transparent MARK missing")
 	}
 	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254") {
 		t.Fatal("ip rule lookup 4254 missing")
@@ -150,8 +154,8 @@ func TestUDPTProxyPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
 		t.Fatal("mangle PREROUTING jump missing")
 	}
-	if !planHasToken(p.Install, "CONNMARK") {
-		t.Fatal("CONNMARK required (PRESENT on KN-1011)")
+	if err := assertUDPOrder(p.Install); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -435,6 +439,236 @@ func TestNilExecutorRejected(t *testing.T) {
 	_, err := NewHybridIptablesEngine(testClient(), nil, nil)
 	if !errors.Is(err, ErrNilExecutor) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func assertUDPOrder(install []Argv) error {
+	idxRestore, idxExclude, idxMark, idxSave, idxTproxy := -1, -1, -1, -1, -1
+	for i, c := range install {
+		if hasSeq(c.Args, "--restore-mark") {
+			idxRestore = i
+		}
+		if hasSeq(c.Args, ChainUDP, "-m", "set", "--match-set", SetExcludeV4) {
+			idxExclude = i
+		}
+		if hasSeq(c.Args, "-m", "socket", "--transparent", "-j", "MARK") {
+			idxMark = i
+		}
+		if hasSeq(c.Args, "--save-mark") {
+			idxSave = i
+		}
+		if hasSeq(c.Args, "-j", "TPROXY") {
+			idxTproxy = i
+		}
+	}
+	if idxRestore < 0 || idxExclude < 0 || idxMark < 0 || idxSave < 0 || idxTproxy < 0 {
+		return errors.New("UDP path missing restore/exclude/socket MARK/save/TPROXY")
+	}
+	if !(idxRestore < idxExclude && idxExclude < idxMark && idxMark < idxSave && idxSave < idxTproxy) {
+		return errors.New("UDP order must be restore → exclusions → socket MARK → CONNMARK save → TPROXY")
+	}
+	return nil
+}
+
+func TestFailOpenIncomplete(t *testing.T) {
+	fx := newFakeExecutor()
+	eng := newTestEngine(t, fx)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fx.failDetach = true
+	fx.natS = "-A PREROUTING -j BTKN_PRE"
+	fx.mangleS = "-A PREROUTING -j BTKN_PRE"
+	fx.ipRule = "32765:\tfrom all fwmark 0x42544b4e lookup 4254"
+	fx.tableOut = "local default dev lo scope host"
+	err := eng.FailOpen(context.Background())
+	if err == nil {
+		t.Fatal("FailOpen must not return nil when detach fails with leftover hooks")
+	}
+	if !errors.Is(err, ErrCleanupIncomplete) {
+		t.Fatalf("got %v want ErrCleanupIncomplete", err)
+	}
+}
+
+func TestPartialApplyRollbackJoinsCleanupError(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.failAtMut = 3
+	fx.failDetach = true
+	eng := newTestEngine(t, fx)
+	err := eng.Apply(context.Background())
+	if err == nil {
+		t.Fatal("expected injected failure")
+	}
+	if !errors.Is(err, ErrCleanupIncomplete) {
+		t.Fatalf("rollback failure must join ErrCleanupIncomplete, got %v", err)
+	}
+	if eng.applied {
+		t.Fatal("partial Apply must not set applied")
+	}
+}
+
+func TestPreflightToolFailure(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natErr = errors.New("iptables: permission denied")
+	eng := newTestEngine(t, fx)
+	_, err := eng.Preflight(context.Background())
+	if !errors.Is(err, ErrPreflightProbe) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPreflightUnknownTableError(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.tableErr = errors.New("ip: RTNETLINK answers: Operation not permitted")
+	eng := newTestEngine(t, fx)
+	_, err := eng.Preflight(context.Background())
+	if !errors.Is(err, ErrPreflightProbe) {
+		t.Fatalf("unknown table 4254 error must be preflight failure, got %v", err)
+	}
+}
+
+func TestProcNetHexPortCollision(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssErr = errors.New("ss: not found")
+	fx.tcpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:2E2C 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1 0000000000000000 100 0 0 10 0"
+	fx.udpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK || !hasKind(rep, CollisionPort) {
+		t.Fatalf("hex /proc/net/tcp port 11820 (2E2C) must collide: %+v", rep)
+	}
+}
+
+func TestExpectedXrayOwnerNotCollision(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssOut = `tcp LISTEN 0 128 0.0.0.0:11820 0.0.0.0:* users:(("xray",pid=99,fd=8))`
+	fx.exeByPID = map[int]string{99: OurXrayExecutable}
+	eng := newTestEngine(t, fx)
+	eng.SetExpectedListener(ExpectedListener{Executable: OurXrayExecutable, PID: 99})
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK || hasKind(rep, CollisionPort) {
+		t.Fatalf("our xray owning 11820 is not a collision: %+v", rep)
+	}
+}
+
+func TestForeignXrayOwnerCollision(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssOut = `tcp LISTEN 0 128 0.0.0.0:11820 0.0.0.0:* users:(("xray",pid=7,fd=8))`
+	fx.exeByPID = map[int]string{7: "/opt/sbin/xray"}
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK || !hasKind(rep, CollisionPort) {
+		t.Fatalf("/opt/sbin/xray must collide: %+v", rep)
+	}
+}
+
+func TestReconcileManagerRestart(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-A PREROUTING -j BTKN_PRE\n-N BTKN_PRE"
+	fx.mangleS = "-A PREROUTING -j BTKN_PRE\n-N BTKN_PRE"
+	fx.ipRule = "32765:\tfrom all fwmark 0x42544b4e lookup 4254"
+	fx.tableOut = "local default dev lo scope host"
+	eng := newTestEngine(t, fx)
+	eng.applied = false
+	if err := eng.Reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if !eng.applied {
+		t.Fatal("desired reconcile must Apply fresh after removing stale BTKN")
+	}
+}
+
+func TestReconcileNDMPartialLeftovers(t *testing.T) {
+	t.Run("chains gone rule remains", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.ipRule = "from all fwmark 0x42544b4e lookup 4254"
+		fx.tableOut = "local default dev lo scope host"
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("chain remains rule gone", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.natS = "-A PREROUTING -j BTKN_PRE\n-N BTKN_PRE"
+		fx.tableErr = errors.New("FIB table does not exist")
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestForeignCollisionNoAutopick(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.tableOut = "local default dev lo table 4254 scope host"
+	fx.ipRule = "from all fwmark 0x42544b4e lookup 9999"
+	fx.ssOut = `tcp LISTEN 0 128 0.0.0.0:11820 0.0.0.0:* users:(("xray",pid=7,fd=8))`
+	fx.exeByPID = map[int]string{7: "/opt/sbin/xray"}
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK {
+		t.Fatal("foreign mark/table/port must FAIL")
+	}
+	if err := eng.Apply(context.Background()); !errors.Is(err, ErrCaptureCollision) {
+		t.Fatalf("Apply: %v", err)
+	}
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasToken(p.Install, "0x42544b4e/0xffffffff") || !planHasToken(p.Install, "11820") || !planHasToken(p.Install, "4254") {
+		t.Fatal("must not auto-pick another port/mark/table")
+	}
+}
+
+func TestProductionForbidsGlobalMutation(t *testing.T) {
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		s := string(b)
+		for _, bad := range []string{
+			"iptables -t nat -F\n",
+			"iptables -t mangle -F\n",
+			"ip rule flush",
+			"ip route flush",
+			"sysctl -w",
+			"swapoff",
+			"swapon",
+			"rmmod",
+			"modprobe -r",
+		} {
+			if strings.Contains(s, bad) {
+				t.Errorf("%s contains forbidden %q", path, strings.TrimSpace(bad))
+			}
+		}
+		if strings.Contains(s, `"iptables"`) && strings.Contains(s, `"-F"`) {
+			// allowed only with BTKN_ chain in the same argv helper; plan tests cover that.
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

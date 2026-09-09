@@ -61,19 +61,22 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 		iptables("-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", port),
 	)
 
-	// UDP TPROXY: selected LAN client → mangle PREROUTING → private/local
-	// exclusion → socket-transparent guard → TPROXY 127.0.0.1:11820
-	// mark 0x42544b4e → ip rule → table 4254 → local lo.
+	// UDP TPROXY: hardware-proven XKeen order, BTKN mark/port/table only.
+	// ESTABLISHED,RELATED → CONNMARK restore; DNAT/INVALID RETURN;
+	// exclusions RETURN; socket --transparent → MARK (never RETURN without mark);
+	// mark!=0 → CONNMARK save; TPROXY.
 	cmds = append(cmds,
 		iptables("-t", "mangle", "-A", ChainPRE, "-m", "set", "!", "--match-set", SetClientsV4, "src", "-j", "RETURN"),
 		iptables("-t", "mangle", "-A", ChainPRE, "-j", ChainUDP),
-		iptables("-t", "mangle", "-A", ChainUDP, "-j", "CONNMARK", "--restore-mark", "--mask", "0xffffffff"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "mark", "--mark", mark, "-j", "RETURN"),
+		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "CONNMARK", "--restore-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
+		iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "DNAT", "-j", "RETURN"),
+		iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "INVALID", "-j", "RETURN"),
 		iptables("-t", "mangle", "-A", ChainUDP, "-m", "set", "--match-set", SetExcludeV4, "dst", "-j", "RETURN"),
 		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN"),
 		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "BROADCAST", "-j", "RETURN"),
 		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "MULTICAST", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "socket", "--transparent", "-j", "RETURN"),
+		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-xmark", mark),
+		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "mark", "!", "--mark", "0x0", "-j", "CONNMARK", "--save-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
 		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", port, "--tproxy-mark", mark),
 	)
 

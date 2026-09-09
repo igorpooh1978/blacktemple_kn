@@ -216,27 +216,33 @@ function Copy-ScriptViaSshCat {
     $psi.Arguments = Format-NativeArgs ($script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, "cat > $RemotePath"))
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
     $psi.CreateNoWindow = $true
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
+    $script:SshCopyStderr = ''
     [void]$proc.Start()
     $inBytes = [System.IO.File]::ReadAllBytes($lfPath)
-    $proc.StandardInput.BaseStream.Write($inBytes, 0, $inBytes.Length)
-    $proc.StandardInput.Close()
-    if (-not $proc.WaitForExit(60000)) {
-        $proc.Kill()
-        return 124
+    $stdin = $proc.StandardInput.BaseStream
+    $null = $stdin.BeginWrite($inBytes, 0, $inBytes.Length, $null, $null)
+    $deadline = [datetime]::UtcNow.AddMilliseconds(60000)
+    while (-not $proc.HasExited) {
+        if ([datetime]::UtcNow -gt $deadline) {
+            cmd /c ("taskkill /F /T /PID " + $proc.Id) | Out-Null
+            return 124
+        }
+        Start-Sleep -Milliseconds 200
+        $proc.Refresh()
     }
-    $script:SshCopyStderr = $proc.StandardError.ReadToEnd()
-    return $proc.ExitCode
+    $script:SshCopyStderr = ''
+    return [int]$proc.ExitCode
 }
 
 function Invoke-RemoteSh {
     param(
         [Parameter(Mandatory = $true)][string]$RemoteCommand,
-        [int]$TimeoutMs = 120000
+        [int]$TimeoutMs = 180000
     )
     $sshRun = $script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, $RemoteCommand)
     $ErrorActionPreference = 'Continue'
@@ -336,14 +342,11 @@ function Invoke-LiveRoutingSmoke {
 Write-Host "router-smoke.ps1: KN-1011 hardware gate mode=$Mode"
 
 if ($Mode -eq 'Smoke') {
-    $allowMut = $env:BTKN_ALLOW_ROUTING_MUTATION
-    $allowStop = $env:BTKN_ALLOW_XKEEN_STOP
-    if ($allowMut -ne '1' -or $allowStop -ne '1') {
-        Write-LiveSmokeNotRun -Reason 'requires BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1'
-        Write-Host 'Production daemon never stops XKeen. This harness is gated and was not executed.'
-        exit 0
-    }
-    Invoke-LiveRoutingSmoke
+    Write-LiveSmokeNotRun -Reason 'APP_SMOKE_NOT_WIRED'
+    Write-Host 'KERNEL_MUTATION_HARNESS: not executed from Mode Smoke'
+    Write-Host 'blackTempleHardwareSmoke: NOT APPLICABLE'
+    Write-Host 'Actual app smoke (blacktempled + port 11820 + D engine) is not wired.'
+    Write-Host 'Dual gates BTKN_ALLOW_ROUTING_MUTATION / BTKN_ALLOW_XKEEN_STOP remain; they were not set/used this iteration.'
     exit 0
 }
 
@@ -364,11 +367,11 @@ if (-not (Test-Path -LiteralPath $probeLocal)) {
 
 $remoteScript = '/tmp/btkn-router-probe.sh'
 Write-Host 'copying read-only probe via ssh cat (no SFTP)'
-$copyCode = Copy-ScriptViaSshCat -LocalPath $probeLocal -RemotePath $remoteScript
-if ($copyCode -ne 0) {
-    if ($script:SshCopyStderr) {
-        Write-Host ($script:SshCopyStderr.Trim())
-    }
+    $copyCode = Copy-ScriptViaSshCat -LocalPath $probeLocal -RemotePath $remoteScript
+    if ($copyCode -ne 0) {
+        if ($script:SshCopyStderr) {
+            Write-Host ($script:SshCopyStderr.Trim())
+        }
     $idPath = Resolve-IdentityPath
     $usePassword = -not [string]::IsNullOrEmpty($env:BTKN_SSH_PASSWORD)
     if (-not $idPath -and -not $usePassword) {

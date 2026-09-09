@@ -14,13 +14,16 @@ const (
 	defaultFingerprint = "chrome"
 	visionFlow         = "xtls-rprx-vision"
 
-	tagInbound     = "socks-in"
-	tagTransparent = "transparent-in"
-	tagOutbound    = "proxy"
-	dokodemoDoor   = "dokodemo-door"
-	transparentNet = "tcp,udp"
-	tproxyTProxy   = "tproxy"
-	xkeenLivePort  = 1181
+	tagInbound    = "socks-in"
+	tagRedirectIn = "redirect-in"
+	tagTproxyIn   = "tproxy-in"
+	tagOutbound   = "proxy"
+	tunnelProto   = "tunnel"
+	tproxyTProxy  = "tproxy"
+	xkeenLivePort = 1181
+	// transparentListen is not loopback: PREROUTING REDIRECT delivers to
+	// a local address of the router, not a client connect to 127.0.0.1.
+	transparentListen = "0.0.0.0"
 )
 
 // Options controls inbound bind and debug pretty-print.
@@ -30,7 +33,7 @@ type Options struct {
 	EphemeralPort   bool // bind 127.0.0.1:0; Xray accepts port 0 at `run -test`
 	Pretty          bool // debug only; production must stay compact
 	LogLevel        string
-	Transparent     bool // add hybrid dokodemo inbound; SOCKS inbound stays
+	Transparent     bool // add hybrid tunnel inbounds; SOCKS inbound stays
 	TransparentPort int  // default 11820; never 1181 (live XKeen)
 }
 
@@ -86,19 +89,31 @@ func Generate(profile Profile, secrets ConfigSecrets, params OutboundParams, opt
 		Settings: inboundSettings{Auth: "noauth", UDP: true},
 	}}
 	if opts.Transparent {
-		inbounds = append(inbounds, xrayInbound{
-			Tag:      tagTransparent,
-			Listen:   defaultListenHost,
-			Port:     opts.TransparentPort,
-			Protocol: dokodemoDoor,
-			Settings: inboundSettings{
-				Network:        transparentNet,
-				FollowRedirect: true,
+		inbounds = append(inbounds,
+			xrayInbound{
+				Tag:      tagRedirectIn,
+				Listen:   transparentListen,
+				Port:     opts.TransparentPort,
+				Protocol: tunnelProto,
+				Settings: inboundSettings{
+					AllowedNetwork: "tcp",
+					FollowRedirect: true,
+				},
 			},
-			StreamSettings: &inboundStreamSettings{
-				Sockopt: sockoptSettings{TProxy: tproxyTProxy},
+			xrayInbound{
+				Tag:      tagTproxyIn,
+				Listen:   transparentListen,
+				Port:     opts.TransparentPort,
+				Protocol: tunnelProto,
+				Settings: inboundSettings{
+					AllowedNetwork: "udp",
+					FollowRedirect: true,
+				},
+				StreamSettings: &inboundStreamSettings{
+					Sockopt: sockoptSettings{TProxy: tproxyTProxy},
+				},
 			},
-		})
+		)
 	}
 
 	cfg := xrayConfig{
@@ -322,6 +337,7 @@ type inboundSettings struct {
 	Auth           string `json:"auth,omitempty"`
 	UDP            bool   `json:"udp,omitempty"`
 	Network        string `json:"network,omitempty"`
+	AllowedNetwork string `json:"allowedNetwork,omitempty"`
 	FollowRedirect bool   `json:"followRedirect,omitempty"`
 }
 
@@ -330,7 +346,7 @@ type inboundStreamSettings struct {
 }
 
 type sockoptSettings struct {
-	TProxy string `json:"tproxy"`
+	TProxy string `json:"tproxy,omitempty"`
 }
 
 type xrayOutbound struct {

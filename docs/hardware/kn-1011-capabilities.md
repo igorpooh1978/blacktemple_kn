@@ -174,11 +174,9 @@ Evidence only, no engine or cgroup policy chosen:
 go test ./docs/hardware
 ```
 
-`-Mode Probe` **RUN** (read-only IPv6 extension). Runner loaded gitignored `.env` from the main repo / parent search (not committed; worktree has no `.env`). Copy used `ssh cat` because remote SFTP is absent. Password was not placed on the ssh argv and was not printed.
+-Mode Probe this iteration: copy **timed out** (see PACKAGE PROVENANCE). Script still includes PACKAGE-PROVENANCE / MODULE-PROVENANCE sections for the next successful run.
 
-Remote: `sh /tmp/btkn-router-probe.sh` (read-only).
-
-`-Mode Smoke` without gates printed `LIVE ROUTING SMOKE: NOT RUN` and exited 0. Mutating Apply was **not** invoked. Both `BTKN_ALLOW_ROUTING_MUTATION` and `BTKN_ALLOW_XKEEN_STOP` were unset.
+`-Mode Smoke` prints `LIVE ROUTING SMOKE: NOT RUN` `reason: APP_SMOKE_NOT_WIRED` (kernel harness is not BlackTemple app smoke). Mutating Apply was **not** invoked. Both `BTKN_ALLOW_ROUTING_MUTATION` and `BTKN_ALLOW_XKEEN_STOP` were unset.
 
 ## Not done
 
@@ -188,3 +186,42 @@ Remote: `sh /tmp/btkn-router-probe.sh` (read-only).
 - TPROXY not labelled SUPPORTED.
 - IPv6 on the router was not changed. XKeen was not stopped.
 - No merge to `main`.
+
+## PACKAGE PROVENANCE (R6-H)
+
+This-iteration live `.\router-smoke.ps1 -Mode Probe` **timed out** copying the probe via `ssh cat` (exit 124; SSH_ASKPASS + redirected stdin did not complete within 60s). TCP 22 to the router was reachable. Mutating gates were **not** set. XKeen was **not** stopped.
+
+Read-only `opkg status` / `opkg files` / `opkg search` for `ip-full`, `iptables`, `ipset`, `ca-bundle` is implemented in `scripts/router-probe.sh` (`PACKAGE-PROVENANCE`). **This iteration did not capture a fresh dump.**
+
+R5.1 (2026-09-09) already observed Entware userland:
+
+| Tool | R5.1 evidence |
+| --- | --- |
+| `iptables` | `/opt/sbin/iptables` (xtables 1.4.21) |
+| `ipset` | PRESENT v7.24 |
+| `ip` | PRESENT (`ip rule` / `ip route`) |
+| `ca-bundle` | not required by BlackTemple Go TLS (no `SystemCertPool` / system CA usage in `src/`) |
+
+IPK `Depends: ip-full, iptables, ipset` matches production D `HybridRequirements()` tools. Not copied from XKeen (`curl`/`jq`/`coreutils-*` omitted). `ca-bundle` not in Depends.
+
+## MODULE PROVENANCE (R6-H)
+
+Probe searches only:
+
+```text
+/lib/modules/$(uname -r)
+/lib/system-modules/$(uname -r)
+/opt/lib/modules
+/opt/lib/system-modules/$(uname -r)
+```
+
+R5.1 `lsmod` already showed `xt_TPROXY`, `xt_socket` loaded (PRESENT, not SUPPORTED). Fresh path/package-owner dump this iteration: **NOT RUN**.
+
+## BARE INSTALL / CURRENT ENVIRONMENT
+
+| Item | Status |
+| --- | --- |
+| Current environment | **XKEEN_PRESENT** (R5.1; not uninstalled) |
+| BARE BOOTSTRAP CODE | IMPLEMENTED (`src/internal/platform/keenetic` Detect/Prepare/Verify) |
+| BARE CLEAN INSTALL | **NOT VERIFIED** |
+| Prepare on live KN-1011 | **NOT RUN** (modules not loaded this iteration) |

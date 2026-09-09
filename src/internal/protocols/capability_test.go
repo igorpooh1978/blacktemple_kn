@@ -10,10 +10,10 @@ func TestHybridTransparentInboundNotSupported(t *testing.T) {
 	if !row.Generated {
 		t.Fatal("hybrid inbound must be generated")
 	}
-	if row.Protocol != "dokodemo-door" {
+	if row.Protocol != "tunnel" {
 		t.Fatalf("protocol=%s", row.Protocol)
 	}
-	if row.Transport != "tcp,udp" {
+	if row.Transport != "tcp+udp" {
 		t.Fatalf("transport=%s", row.Transport)
 	}
 	if row.Hardware == "SUPPORTED" || row.XrayTest == "SUPPORTED" || row.QEMU == "SUPPORTED" {

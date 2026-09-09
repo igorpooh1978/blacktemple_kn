@@ -3,7 +3,10 @@
 # Installed path: /opt/etc/ndm/netfilter.d/blacktemple-kn.sh
 #
 # Minimal fixed wrapper. No user strings. No env blobs.
-# FAIL-OPEN: if the manager is missing, do not install capture.
+# FAIL-OPEN: if the manager is missing, exit 0 and do not install capture.
+# This does NOT delete stale BTKN rules. Package uninstall must clean owned
+# BTKN before removing the manager binary. CLI netfilter-reconcile is not
+# wired in this wave.
 # Absence of VPN is better than absence of internet.
 #
 # Router self-generated traffic stays DIRECT.
