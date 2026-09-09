@@ -30,10 +30,12 @@ type fakeExecutor struct {
 	pidofErr  error
 	exeByPID  map[int]string
 
-	failAtMut  int
-	mutCount   int
-	failErr    error
-	failDetach bool
+	failAtMut      int
+	mutCount       int
+	failErr        error
+	failDetach     bool
+	failPermission bool
+	ipsetPresent   bool
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -59,12 +61,18 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 		if f.failDetach && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
 			return "", errors.New("fake detach jump failed")
 		}
+		if f.failPermission && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
+			return "iptables: Permission denied.\n", errors.New("exit status 1")
+		}
 		if f.failAtMut > 0 && f.mutCount == f.failAtMut {
 			err := f.failErr
 			if err == nil {
 				err = errors.New("fake executor injected failure")
 			}
 			return "", err
+		}
+		if isUninstallCmd(name, args) && !f.uninstallTargetPresent(name, args) {
+			return absentCombinedOutput(name, args)
 		}
 		f.applySuccess(name, args)
 		return "", nil
@@ -149,6 +157,71 @@ func (f *fakeExecutor) applySuccess(name string, args []string) {
 				f.mangleS = strings.ReplaceAll(f.mangleS, ch, "")
 			}
 		}
+	}
+	if name == "ipset" && hasToken(args, "create") {
+		f.ipsetPresent = true
+	}
+	if name == "ipset" && hasToken(args, "destroy") {
+		f.ipsetPresent = false
+	}
+}
+
+func isUninstallCmd(name string, args []string) bool {
+	if name == "iptables" {
+		return hasToken(args, "-D") || hasToken(args, "-X") || hasToken(args, "-F")
+	}
+	if name == "ip" {
+		return hasToken(args, "del") || hasToken(args, "delete")
+	}
+	if name == "ipset" {
+		return hasToken(args, "destroy") || hasToken(args, "flush")
+	}
+	return false
+}
+
+func (f *fakeExecutor) uninstallTargetPresent(name string, args []string) bool {
+	if name == "iptables" && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
+		dump := f.natS
+		if hasSeq(args, "-t", "mangle") {
+			dump = f.mangleS
+		}
+		return jumpPresent(dump, "PREROUTING", ChainPRE)
+	}
+	if name == "iptables" && (hasToken(args, "-X") || hasToken(args, "-F")) {
+		dump := f.natS + "\n" + f.mangleS
+		for _, ch := range []string{ChainPRE, ChainTCP, ChainUDP, ChainOUT} {
+			if hasToken(args, ch) && strings.Contains(dump, ch) {
+				return true
+			}
+		}
+		return false
+	}
+	if name == "ip" && hasToken(args, "rule") {
+		return ownedMarkRulePresent(f.ipRule)
+	}
+	if name == "ip" && hasToken(args, "route") {
+		return tableStillPresent(f.tableOut, f.tableErr)
+	}
+	if name == "ipset" {
+		return f.ipsetPresent
+	}
+	return true
+}
+
+func absentCombinedOutput(name string, args []string) (string, error) {
+	switch {
+	case name == "iptables" && hasToken(args, "-D"):
+		return "iptables: Bad rule (does a matching rule exist in that chain?).\n", errors.New("exit status 1")
+	case name == "iptables":
+		return "iptables: No chain/target/match by that name.\n", errors.New("exit status 1")
+	case name == "ip" && hasToken(args, "rule"):
+		return "RTNETLINK answers: No such process\n", errors.New("exit status 2")
+	case name == "ip":
+		return "Error: ipv4: FIB table does not exist.\nDump terminated\n", errors.New("exit status 2")
+	case name == "ipset":
+		return "ipset v7: The set with the given name does not exist\n", errors.New("exit status 1")
+	default:
+		return "", errors.New("exit status 1")
 	}
 }
 

@@ -1,35 +1,429 @@
 #!/bin/sh
 # Read-only KN-1011 capability probe (POSIX / BusyBox).
 # Best-effort: a missing tool prints NOT AVAILABLE and the probe continues.
-# Does not mutate routing, firewall, sysctl, packages, or processes.
+# Resource-safe diagnostic: single instance, hard timeout, owned-tree cleanup.
+# Does not mutate routing, firewall, sysctl, packages, or foreign processes.
 
-echo "blacktemple-kn router-probe"
-echo "mode=read-only"
-echo "shell=$0"
+BTKN_PROBE_LOCKDIR="/tmp/btkn-router-probe.lock"
+BTKN_PROBE_MAX_SEC="${BTKN_PROBE_MAX_SEC:-180}"
+BTKN_PROBE_GRACE_SEC="${BTKN_PROBE_GRACE_SEC:-2}"
+BTKN_PROBE_CMD_SEC="${BTKN_PROBE_CMD_SEC:-10}"
+BTKN_PROBE_MAX_BYTES=262144
+BTKN_WATCHDOG_PID=""
 
-redact() {
-	# Strip MAC, UUID, SSID, URL, key-shaped values, and public IPs from stdin.
-	if ! command -v sed >/dev/null 2>&1; then
-		cat
-		return 0
-	fi
-	sed \
-		-e 's/[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]/[REDACTED-MAC]/g' \
-		-e 's/[0-9a-fA-F]\{8\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{12\}/[REDACTED-UUID]/g' \
-		-e 's/[Ss][Ss][Ii][Dd]="[^"]*"/ssid="[REDACTED-SSID]"/g' \
-		-e 's/[Ss][Ss][Ii][Dd]=[^[:space:]]*/ssid=[REDACTED-SSID]/g' \
-		-e 's/[Ee][Ss][Ss][Ii][Dd][: ][^[:space:]]*/ESSID:[REDACTED-SSID]/g' \
-		-e 's/\(password\|passwd\|privateKey\|publicKey\|accessKey\|secret\|token\|uuid\)":[[:space:]]*"[^"]*"/\1":"[REDACTED]"/g' \
-		-e 's/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^[:space:]"'\'']*/[REDACTED-URL]/g' \
-	| redact_ip | redact_ip6
+btkn_ppid() {
+	sed -n 's/^PPid:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null
 }
 
-redact_ip() {
+btkn_cmdline() {
+	if [ ! -r "/proc/$1/cmdline" ]; then
+		echo ""
+		return 1
+	fi
+	tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true
+}
+
+btkn_has_run_id() {
+	_pid=$1
+	_id=$2
+	[ -n "$_id" ] || return 1
+	tr '\0' '\n' < "/proc/${_pid}/environ" 2>/dev/null | grep -q "^BTKN_PROBE_RUN_ID=${_id}$"
+}
+
+btkn_forbidden_cmd() {
+	_c=$(echo "$1" | tr 'A-Z' 'a-z')
+	case "$_c" in
+		*xray*|*xkeen*|*ndnproxy*|*nginx*|*ndm*) return 0 ;;
+	esac
+	return 1
+}
+
+btkn_root_ok() {
+	_pid=$1
+	_id=$2
+	[ -d "/proc/${_pid}" ] || return 1
+	_cmd=$(btkn_cmdline "$_pid")
+	echo "$_cmd" | grep -q 'btkn-router-probe.sh' || return 1
+	btkn_has_run_id "$_pid" "$_id" || return 1
+	btkn_forbidden_cmd "$_cmd" && return 1
+	return 0
+}
+
+btkn_is_probe_script() {
+	echo "$1" | grep -q 'btkn-router-probe.sh'
+}
+
+btkn_collect_descendants() {
+	_root=$1
+	_list="${_root}"
+	_changed=1
+	while [ "$_changed" -eq 1 ]; do
+		_changed=0
+		for _d in /proc/[0-9]*; do
+			_p=${_d#/proc/}
+			echo " $_list " | grep -q " $_p " && continue
+			_pp=$(btkn_ppid "$_p")
+			echo " $_list " | grep -q " $_pp " || continue
+			_cmd=$(btkn_cmdline "$_p")
+			btkn_forbidden_cmd "$_cmd" && continue
+			_list="${_list} ${_p}"
+			_changed=1
+		done
+	done
+	echo "$_list"
+}
+
+btkn_signal_list() {
+	_sig=$1
+	_root=$2
+	shift 2
+	_rev=""
+	for _p in "$@"; do
+		_rev="${_p} ${_rev}"
+	done
+	for _p in $_rev; do
+		[ "$_p" = "$_root" ] && continue
+		[ "$_p" = "1" ] && continue
+		kill -$_sig "$_p" 2>/dev/null || true
+	done
+	[ "$_root" = "1" ] || kill -$_sig "$_root" 2>/dev/null || true
+}
+
+btkn_collect_owned() {
+	btkn_collect_descendants "$1"
+}
+
+btkn_term_kill_tree() {
+	_root=$1
+	_list=$(btkn_collect_descendants "$_root")
+	_rev=""
+	for _p in $_list; do
+		_rev="${_p} ${_rev}"
+	done
+	for _p in $_rev; do
+		[ "$_p" = "$_root" ] && continue
+		[ "$_p" = "1" ] && continue
+		kill -TERM "$_p" 2>/dev/null || true
+	done
+	[ "$_root" = "1" ] || kill -TERM "$_root" 2>/dev/null || true
+	sleep "$BTKN_PROBE_GRACE_SEC"
+	_list=$(btkn_collect_descendants "$_root")
+	for _p in $_list; do
+		[ "$_p" = "1" ] && continue
+		[ -d "/proc/${_p}" ] || continue
+		kill -KILL "$_p" 2>/dev/null || true
+	done
+}
+
+btkn_kill_owned_tree() {
+	_root=${1:-$$}
+	_id=${BTKN_PROBE_RUN_ID:-}
+	btkn_root_ok "$_root" "$_id" || return 0
+	btkn_term_kill_tree "$_root"
+}
+
+btkn_kill_script_tree() {
+	_root=$1
+	[ -n "$_root" ] || return 0
+	[ "$_root" = "$$" ] && return 0
+	[ "$_root" = "1" ] && return 0
+	_cmd=$(btkn_cmdline "$_root")
+	btkn_is_probe_script "$_cmd" || return 0
+	btkn_forbidden_cmd "$_cmd" && return 0
+	btkn_term_kill_tree "$_root"
+}
+
+btkn_reap_other_probe_scripts() {
+	_self=$$
+	_roots=""
+	for _d in /proc/[0-9]*; do
+		_p=${_d#/proc/}
+		[ "$_p" = "$_self" ] && continue
+		_cmd=$(btkn_cmdline "$_p") || continue
+		btkn_is_probe_script "$_cmd" || continue
+		btkn_forbidden_cmd "$_cmd" && continue
+		_pp=$(btkn_ppid "$_p")
+		_walk=$_pp
+		_skip=0
+		while [ -n "$_walk" ] && [ "$_walk" != "0" ] && [ "$_walk" != "1" ]; do
+			if [ "$_walk" = "$_self" ]; then
+				_skip=1
+				break
+			fi
+			_walk=$(btkn_ppid "$_walk")
+		done
+		[ "$_skip" -eq 1 ] && continue
+		_roots="${_roots} ${_p}"
+	done
+	[ -n "$_roots" ] || return 0
+	_all=""
+	for _r in $_roots; do
+		_all="${_all} $(btkn_collect_descendants "$_r")"
+	done
+	_rev=""
+	for _p in $_all; do
+		_rev="${_p} ${_rev}"
+	done
+	for _p in $_rev; do
+		[ "$_p" = "$_self" ] && continue
+		[ "$_p" = "1" ] && continue
+		kill -TERM "$_p" 2>/dev/null || true
+	done
+	sleep "$BTKN_PROBE_GRACE_SEC"
+	for _p in $_rev; do
+		[ "$_p" = "$_self" ] && continue
+		[ "$_p" = "1" ] && continue
+		[ -d "/proc/${_p}" ] || continue
+		kill -KILL "$_p" 2>/dev/null || true
+	done
+}
+
+btkn_release_lock() {
+	[ -d "$BTKN_PROBE_LOCKDIR" ] || return 0
+	rm -f "$BTKN_PROBE_LOCKDIR/meta" "$BTKN_PROBE_LOCKDIR/pid" 2>/dev/null || true
+	rmdir "$BTKN_PROBE_LOCKDIR" 2>/dev/null || rm -rf "$BTKN_PROBE_LOCKDIR" 2>/dev/null || true
+}
+
+btkn_stop_watchdog() {
+	if [ -n "$BTKN_WATCHDOG_PID" ]; then
+		for _d in /proc/[0-9]*; do
+			_p=${_d#/proc/}
+			_pp=$(btkn_ppid "$_p")
+			if [ "$_pp" = "$BTKN_WATCHDOG_PID" ]; then
+				kill -TERM "$_p" 2>/dev/null || true
+			fi
+		done
+		kill -TERM "$BTKN_WATCHDOG_PID" 2>/dev/null || true
+		BTKN_WATCHDOG_PID=""
+	fi
+}
+
+btkn_timeout_kill() {
+	echo "TIMEOUT"
+	btkn_kill_owned_tree "$$"
+	btkn_release_lock
+}
+
+btkn_on_signal() {
+	_st=$?
+	trap '' EXIT INT TERM HUP
+	btkn_stop_watchdog
+	btkn_kill_owned_tree "$$"
+	btkn_release_lock
+	exit $_st
+}
+
+btkn_reap_run_id() {
+	_id=$1
+	[ -n "$_id" ] || return 0
+	_list=""
+	for _d in /proc/[0-9]*; do
+		_p=${_d#/proc/}
+		btkn_has_run_id "$_p" "$_id" || continue
+		_cmd=$(btkn_cmdline "$_p")
+		btkn_forbidden_cmd "$_cmd" && continue
+		_list="${_list} ${_p}"
+	done
+	[ -n "$_list" ] || return 0
+	_rev=""
+	for _p in $_list; do
+		_rev="${_p} ${_rev}"
+	done
+	for _p in $_rev; do
+		[ "$_p" = "1" ] && continue
+		kill -TERM "$_p" 2>/dev/null || true
+	done
+	sleep "$BTKN_PROBE_GRACE_SEC"
+	for _p in $_rev; do
+		[ "$_p" = "1" ] && continue
+		[ -d "/proc/${_p}" ] || continue
+		btkn_has_run_id "$_p" "$_id" || continue
+		_cmd=$(btkn_cmdline "$_p")
+		btkn_forbidden_cmd "$_cmd" && continue
+		kill -KILL "$_p" 2>/dev/null || true
+	done
+}
+
+btkn_run_id_left() {
+	_id=$1
+	for _d in /proc/[0-9]*; do
+		_p=${_d#/proc/}
+		btkn_has_run_id "$_p" "$_id" || continue
+		_cmd=$(btkn_cmdline "$_p")
+		btkn_forbidden_cmd "$_cmd" && continue
+		return 0
+	done
+	return 1
+}
+
+btkn_lock_live_identity() {
+	_meta="$BTKN_PROBE_LOCKDIR/meta"
+	[ -r "$_meta" ] || return 1
+	_oldpid=$(sed -n 's/^pid=//p' "$_meta" | head -n 1)
+	_oldid=$(sed -n 's/^run_id=//p' "$_meta" | head -n 1)
+	[ -n "$_oldpid" ] || return 1
+	if [ ! -d "/proc/${_oldpid}" ]; then
+		return 1
+	fi
+	if btkn_root_ok "$_oldpid" "$_oldid"; then
+		return 0
+	fi
+	return 2
+}
+
+btkn_acquire() {
+	if [ -z "$BTKN_PROBE_RUN_ID" ]; then
+		BTKN_PROBE_RUN_ID="${$}-$(date +%s)"
+	fi
+	export BTKN_PROBE_RUN_ID
+	if mkdir "$BTKN_PROBE_LOCKDIR" 2>/dev/null; then
+		:
+	else
+		btkn_lock_live_identity
+		_lk=$?
+		if [ "$_lk" -eq 0 ]; then
+			echo "ALREADY_RUNNING"
+			exit 0
+		fi
+		if [ "$_lk" -eq 2 ]; then
+			echo "FOREIGN_OR_UNKNOWN_PROCESS"
+			exit 0
+		fi
+		if [ ! -r "$BTKN_PROBE_LOCKDIR/meta" ]; then
+			sleep 1
+			btkn_lock_live_identity
+			_lk=$?
+			if [ "$_lk" -eq 0 ]; then
+				echo "ALREADY_RUNNING"
+				exit 0
+			fi
+			if [ "$_lk" -eq 2 ]; then
+				echo "FOREIGN_OR_UNKNOWN_PROCESS"
+				exit 0
+			fi
+		fi
+		_oldid=$(sed -n 's/^run_id=//p' "$BTKN_PROBE_LOCKDIR/meta" 2>/dev/null | head -n 1)
+		btkn_reap_run_id "$_oldid"
+		btkn_release_lock
+		if ! mkdir "$BTKN_PROBE_LOCKDIR" 2>/dev/null; then
+			echo "ALREADY_RUNNING"
+			exit 0
+		fi
+	fi
+	{
+		echo "run_id=${BTKN_PROBE_RUN_ID}"
+		echo "pid=$$"
+		echo "script=$0"
+		echo "started=$(date +%s)"
+		echo "cmdline=$(btkn_cmdline $$)"
+	} > "$BTKN_PROBE_LOCKDIR/meta"
+	echo "$$" > "$BTKN_PROBE_LOCKDIR/pid"
+	trap 'btkn_on_signal' EXIT INT TERM HUP
+	(
+		sleep "$BTKN_PROBE_MAX_SEC"
+		echo "TIMEOUT"
+		# Re-read pid from lock; only kill if identity still matches.
+		if [ -r "$BTKN_PROBE_LOCKDIR/meta" ]; then
+			_tpid=$(sed -n 's/^pid=//p' "$BTKN_PROBE_LOCKDIR/meta" | head -n 1)
+			_tid=$(sed -n 's/^run_id=//p' "$BTKN_PROBE_LOCKDIR/meta" | head -n 1)
+			if [ "$_tid" = "$BTKN_PROBE_RUN_ID" ] && btkn_root_ok "$_tpid" "$_tid"; then
+				BTKN_PROBE_RUN_ID=$_tid
+				export BTKN_PROBE_RUN_ID
+				btkn_kill_owned_tree "$_tpid"
+				btkn_release_lock
+			fi
+		fi
+	) &
+	BTKN_WATCHDOG_PID=$!
+}
+
+btkn_finish() {
+	trap '' EXIT INT TERM HUP
+	btkn_stop_watchdog
+	btkn_release_lock
+}
+
+btkn_cmd_cleanup() {
+	_want=$1
+	if [ -z "$_want" ]; then
+		echo "REMOTE_PROCESS_NOT_FOUND"
+		return 1
+	fi
+	BTKN_PROBE_RUN_ID=$_want
+	export BTKN_PROBE_RUN_ID
+	_had=0
+	if btkn_run_id_left "$_want"; then
+		_had=1
+	fi
+	if [ -d "$BTKN_PROBE_LOCKDIR" ]; then
+		_oldpid=$(sed -n 's/^pid=//p' "$BTKN_PROBE_LOCKDIR/meta" 2>/dev/null | head -n 1)
+		_oldid=$(sed -n 's/^run_id=//p' "$BTKN_PROBE_LOCKDIR/meta" 2>/dev/null | head -n 1)
+		if [ -n "$_oldid" ] && [ "$_oldid" != "$_want" ]; then
+			echo "REMOTE_PROCESS_FOREIGN"
+			return 1
+		fi
+		if [ -n "$_oldpid" ] && [ -d "/proc/${_oldpid}" ]; then
+			if btkn_root_ok "$_oldpid" "$_want"; then
+				btkn_kill_owned_tree "$_oldpid"
+				_had=1
+			elif [ -n "$_oldid" ]; then
+				echo "REMOTE_PROCESS_FOREIGN"
+				return 1
+			fi
+		fi
+	fi
+	btkn_reap_run_id "$_want"
+	btkn_release_lock
+	if btkn_run_id_left "$_want"; then
+		echo "TIMEOUT_CLEANUP_FAILED"
+		return 1
+	fi
+	if [ "$_had" -eq 1 ]; then
+		echo "TIMEOUT_CLEANED"
+		return 0
+	fi
+	echo "REMOTE_PROCESS_NOT_FOUND"
+	return 1
+}
+
+btkn_cmd_cleanup_orphans() {
+	btkn_reap_other_probe_scripts
+	_left=0
+	for _d in /proc/[0-9]*; do
+		_p=${_d#/proc/}
+		[ "$_p" = "$$" ] && continue
+		_cmd=$(btkn_cmdline "$_p")
+		btkn_is_probe_script "$_cmd" || continue
+		btkn_forbidden_cmd "$_cmd" && continue
+		_pp=$(btkn_ppid "$_p")
+		_walk=$_pp
+		_skip=0
+		while [ -n "$_walk" ] && [ "$_walk" != "0" ] && [ "$_walk" != "1" ]; do
+			if [ "$_walk" = "$$" ]; then
+				_skip=1
+				break
+			fi
+			_walk=$(btkn_ppid "$_walk")
+		done
+		[ "$_skip" -eq 1 ] && continue
+		_left=1
+	done
+	if [ "$_left" -eq 1 ]; then
+		echo "TIMEOUT_CLEANUP_FAILED"
+		return 1
+	fi
+	echo "TIMEOUT_CLEANED"
+	return 0
+}
+
+redact() {
+	# One-pass awk. No sed|awk|awk pipeline. IPv6 only on lines with :: or 3+ colons.
 	if ! command -v awk >/dev/null 2>&1; then
 		cat
 		return 0
 	fi
-	awk '
+	awk -v cap="$BTKN_PROBE_MAX_BYTES" '
+		BEGIN { n = 0 }
 		function private_ip(ip,   a) {
 			split(ip, a, ".")
 			if (a[1] + 0 == 10) return 1
@@ -41,38 +435,8 @@ redact_ip() {
 			if (a[1] + 0 == 255) return 1
 			return 0
 		}
-		{
-			rest = $0
-			out = ""
-			while (match(rest, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
-				out = out substr(rest, 1, RSTART - 1)
-				ip = substr(rest, RSTART, RLENGTH)
-				if (private_ip(ip)) out = out ip
-				else out = out "[REDACTED-IP]"
-				rest = substr(rest, RSTART + RLENGTH)
-			}
-			print out rest
-		}
-	'
-}
-
-redact_ip6() {
-	# Redact global IPv6; keep loopback, link-local, ULA, multicast.
-	# Skip HH:MM:SS (two colons, no ::) to avoid clobbering timestamps.
-	if ! command -v awk >/dev/null 2>&1; then
-		cat
-		return 0
-	fi
-	awk '
-		function colons(s,   n, i) {
-			n = 0
-			for (i = 1; i <= length(s); i++) {
-				if (substr(s, i, 1) == ":") n++
-			}
-			return n
-		}
-		function local_ip6(ip,   n, cidr) {
-			n = tolower(ip)
+		function keep_ip6(tok,   n, cidr) {
+			n = tolower(tok)
 			gsub(/\[|\]/, "", n)
 			cidr = ""
 			if (match(n, /\/[0-9]+$/)) {
@@ -80,27 +444,45 @@ redact_ip6() {
 				n = substr(n, 1, RSTART - 1)
 			}
 			if (n == "::" || n == "::1") return 1
-			# Prefix-only link-local / ULA / multicast; host IIDs are redacted.
-			if (n == "fe80::" && cidr != "") return 1
+			if (n == "fe80::") return 1
 			if (n == "fc00::" || n == "fd00::" || n == "ff00::") return 1
 			return 0
 		}
 		{
-			rest = $0
+			n += length($0) + 1
+			if (n > cap) { print "[TRUNCATED]"; exit }
+			if (length($0) > 4096) $0 = substr($0, 1, 4096) "[TRUNCATED]"
+			gsub(/[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]/, "[REDACTED-MAC]")
+			gsub(/[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]/, "[REDACTED-UUID]")
+			gsub(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^ \t"'\'']+/, "[REDACTED-URL]")
+			line = $0
 			out = ""
-			while (match(rest, /\[?[0-9A-Fa-f:]+\]?(\/[0-9]+)?/)) {
-				tok = substr(rest, RSTART, RLENGTH)
-				c = colons(tok)
-				keep = 0
-				if (c < 2) keep = 1
-				else if (c == 2 && index(tok, "::") == 0) keep = 1
-				else if (local_ip6(tok)) keep = 1
-				out = out substr(rest, 1, RSTART - 1)
-				if (keep) out = out tok
-				else out = out "[REDACTED-IP6]"
-				rest = substr(rest, RSTART + RLENGTH)
+			while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+				out = out substr(line, 1, RSTART - 1)
+				ip = substr(line, RSTART, RLENGTH)
+				if (private_ip(ip)) out = out ip
+				else out = out "[REDACTED-IP]"
+				line = substr(line, RSTART + RLENGTH)
 			}
-			print out rest
+			line = out line
+			out = ""
+			cc = gsub(/:/, ":", line)
+			if (index(line, "::") > 0 || cc >= 3) {
+				rest = line
+				while (match(rest, /[0-9A-Fa-f]*:[0-9A-Fa-f:]+/)) {
+					tok = substr(rest, RSTART, RLENGTH)
+					nc = gsub(/:/, ":", tok)
+					out = out substr(rest, 1, RSTART - 1)
+					if (nc < 2) out = out tok
+					else if (nc == 2 && index(tok, "::") == 0) out = out tok
+					else if (keep_ip6(tok)) out = out tok
+					else out = out "[REDACTED-IP6]"
+					rest = substr(rest, RSTART + RLENGTH)
+				}
+				print out rest
+			} else {
+				print line
+			}
 		}
 	'
 }
@@ -152,6 +534,48 @@ try() {
 		return 0
 	fi
 	"$@" 2>&1 | redact
+	return 0
+}
+
+try_net() {
+	_label=$1
+	shift
+	_bin=$1
+	echo "--- ${_label} ---"
+	if [ -z "$_bin" ]; then
+		echo "NOT AVAILABLE"
+		return 0
+	fi
+	if ! have "$_bin"; then
+		echo "NOT AVAILABLE: ${_bin}"
+		return 0
+	fi
+	"$@" 2>&1 | redact &
+	_pipe=$!
+	_n=0
+	while [ "$_n" -lt "$BTKN_PROBE_CMD_SEC" ]; do
+		if [ ! -d "/proc/${_pipe}" ]; then
+			wait "$_pipe" 2>/dev/null || true
+			return 0
+		fi
+		sleep 1
+		_n=$((_n + 1))
+	done
+	_cmd=$(btkn_cmdline "$_pipe")
+	btkn_forbidden_cmd "$_cmd" && return 0
+	_list=$(btkn_collect_descendants "$_pipe")
+	for _p in $_list; do
+		[ "$_p" = "1" ] && continue
+		kill -TERM "$_p" 2>/dev/null || true
+	done
+	sleep 1
+	for _p in $_list; do
+		[ "$_p" = "1" ] && continue
+		[ -d "/proc/${_p}" ] || continue
+		kill -KILL "$_p" 2>/dev/null || true
+	done
+	wait "$_pipe" 2>/dev/null || true
+	echo "BOUNDED: ${_label}"
 	return 0
 }
 
@@ -243,6 +667,22 @@ excerpt_topic_lines() {
 	echo "--- excerpt ${_file} ---"
 	grep -n -E -i 'iptables|ipset|TPROXY|REDIRECT|MARK|CONNMARK|fwmark|[[:space:]]ip[[:space:]]+rule|[[:space:]]ip[[:space:]]+route|DNS|[[:space:]]53([^0-9]|$)|policy|routing-mark|proxy[[:space:]]*mode' "$_file" 2>/dev/null | head -n 20 | redact || echo "(no matching topic lines)"
 }
+
+if [ "$1" = "--cleanup-run-id" ]; then
+	btkn_cmd_cleanup "$2"
+	exit $?
+fi
+if [ "$1" = "--cleanup-orphans" ]; then
+	btkn_cmd_cleanup_orphans
+	exit $?
+fi
+
+btkn_acquire
+btkn_reap_other_probe_scripts
+echo "blacktemple-kn router-probe"
+echo "run_id=${BTKN_PROBE_RUN_ID}"
+echo "lock=${BTKN_PROBE_LOCKDIR}"
+echo "max_sec=${BTKN_PROBE_MAX_SEC}"
 
 # ----- SYSTEM -----
 section "SYSTEM"
@@ -389,35 +829,41 @@ tool_path netstat
 
 # ----- NETWORK -----
 section "NETWORK"
-try "ip addr" ip addr
-try "ip -s link" ip -s link
-try "ip neigh" ip neigh
+show_file /proc/net/dev
+try_net "ip addr" ip addr
+try_net "ip -s link" ip -s link
+try_net "ip neigh" ip neigh
 
 # ----- ROUTING -----
 section "ROUTING"
-try "ip route" ip route
-try "ip route show table main" ip route show table main
-try "ip route show table default" ip route show table default
-try "ip route show table local" ip route show table local
-try "ip route show table all" ip route show table all
-try "ip rule" ip rule
-try "ip rule list" ip rule list
+try_net "ip route" ip route
+try_net "ip route show table main" ip route show table main
+try_net "ip route show table default" ip route show table default
+try_net "ip route show table local" ip route show table local
+try_net "ip route show table all" ip route show table all
+try_net "ip rule" ip rule
+try_net "ip rule list" ip rule list
 echo "--- policy tables referenced by ip rule ---"
 if have ip; then
+	_seen_tbl=" "
 	ip rule 2>/dev/null | awk '{
 		for (i = 1; i <= NF; i++) {
 			if ($i == "lookup" && (i + 1) <= NF) print $(i + 1)
 		}
-	}' | while IFS= read -r _tbl; do
+	}' | head -n 12 | while IFS= read -r _tbl; do
 		[ -n "$_tbl" ] || continue
-		echo "--- ip route show table ${_tbl} ---"
-		ip route show table "$_tbl" 2>&1 | redact
+		case "$_tbl" in
+			unspec|all) continue ;;
+		esac
+		echo " $_seen_tbl " | grep -q " $_tbl " && continue
+		_seen_tbl="${_seen_tbl}${_tbl} "
+		try_net "ip route show table ${_tbl}" ip route show table "$_tbl"
 	done
 else
 	echo "NOT AVAILABLE: ip"
 fi
-try "ip -6 route" ip -6 route
-try "ip -6 rule" ip -6 rule
+try_net "ip -6 route" ip -6 route
+try_net "ip -6 rule" ip -6 rule
 echo "--- fwmark tokens in ip rule ---"
 if have ip; then
 	ip rule 2>/dev/null | redact | grep -i -e fwmark -e fwmask || echo "no fwmark in ip rule"
@@ -442,18 +888,11 @@ fi
 section "IPTABLES"
 try "iptables --version" iptables --version
 if have iptables; then
-	echo "--- iptables -t nat -S ---"
-	iptables -t nat -S 2>&1 | redact
-	echo "--- iptables -t mangle -S ---"
-	iptables -t mangle -S 2>&1 | redact
-	echo "--- iptables -t filter -S ---"
-	iptables -t filter -S 2>&1 | redact
+	try_net "iptables -t nat -S" iptables -t nat -S
+	try_net "iptables -t mangle -S" iptables -t mangle -S
+	try_net "iptables -t filter -S" iptables -t filter -S
 	echo "--- iptables-save ---"
-	if have iptables-save; then
-		iptables-save 2>&1 | redact
-	else
-		echo "NOT AVAILABLE: iptables-save"
-	fi
+	echo "SKIPPED: bounded table -S dumps already collected"
 else
 	echo "NOT AVAILABLE: iptables"
 fi
@@ -462,43 +901,19 @@ fi
 section "IP6TABLES"
 try "ip6tables --version" ip6tables --version
 if have ip6tables; then
-	echo "--- ip6tables -t nat -S ---"
-	ip6tables -t nat -S 2>&1 | redact
-	echo "--- ip6tables -t mangle -S ---"
-	ip6tables -t mangle -S 2>&1 | redact
-	echo "--- ip6tables -t filter -S ---"
-	ip6tables -t filter -S 2>&1 | redact
+	try_net "ip6tables -t nat -S" ip6tables -t nat -S
+	try_net "ip6tables -t mangle -S" ip6tables -t mangle -S
+	try_net "ip6tables -t filter -S" ip6tables -t filter -S
 else
 	echo "NOT AVAILABLE: ip6tables"
 fi
 show_file /proc/net/ip6_tables_targets
 show_file /proc/net/ip6_tables_matches
 echo "--- IPv6 XKeen rules (names/targets only; addresses redacted) ---"
-_xkeen_ip6_nat="NOT OBSERVED"
-_xkeen_ip6_mangle="NOT OBSERVED"
-_xkeen_ip6_filter="NOT OBSERVED"
-if have ip6tables; then
-	if ip6tables -t nat -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
-		_xkeen_ip6_nat="PRESENT"
-		ip6tables -t nat -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
-	else
-		echo "no xkeen tokens in ip6tables nat"
-	fi
-	if ip6tables -t mangle -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
-		_xkeen_ip6_mangle="PRESENT"
-		ip6tables -t mangle -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
-	else
-		echo "no xkeen tokens in ip6tables mangle"
-	fi
-	if ip6tables -t filter -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
-		_xkeen_ip6_filter="PRESENT"
-		ip6tables -t filter -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
-	else
-		echo "no xkeen tokens in ip6tables filter"
-	fi
-else
-	echo "NOT AVAILABLE: ip6tables"
-fi
+echo "see bounded ip6tables -S dumps above (no second full-table scan)"
+_xkeen_ip6_nat="SEE_BOUNDED_DUMP"
+_xkeen_ip6_mangle="SEE_BOUNDED_DUMP"
+_xkeen_ip6_filter="SEE_BOUNDED_DUMP"
 echo "xkeen_ipv6_nat: ${_xkeen_ip6_nat}"
 echo "xkeen_ipv6_mangle: ${_xkeen_ip6_mangle}"
 echo "xkeen_ipv6_filter: ${_xkeen_ip6_filter}"
@@ -633,31 +1048,15 @@ echo "--- who listens on TCP 53 / UDP 53 ---"
 _dns_tcp="NOT OBSERVED"
 _dns_udp="NOT OBSERVED"
 if have netstat; then
-	echo "--- netstat -lnt (TCP) :53 ---"
-	netstat -lnt 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no TCP :53"
-	echo "--- netstat -lnu (UDP) :53 ---"
-	netstat -lnu 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no UDP :53"
-	echo "--- netstat -lntup :53 ---"
-	netstat -lntup 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no :53 lines"
-	if netstat -lnt 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
-		_dns_tcp="PRESENT"
-	fi
-	if netstat -lnu 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
-		_dns_udp="PRESENT"
-	fi
+	try_net "netstat -lnt" netstat -lnt
+	try_net "netstat -lnu" netstat -lnu
+	_dns_tcp="SEE_BOUNDED_DUMP"
+	_dns_udp="SEE_BOUNDED_DUMP"
 elif have ss; then
-	echo "--- ss -lnt :53 ---"
-	ss -lnt 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no TCP :53"
-	echo "--- ss -lnu :53 ---"
-	ss -lnu 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no UDP :53"
-	echo "--- ss -lntup :53 ---"
-	ss -lntup 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no :53 lines"
-	if ss -lnt 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
-		_dns_tcp="PRESENT"
-	fi
-	if ss -lnu 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
-		_dns_udp="PRESENT"
-	fi
+	try_net "ss -lnt" ss -lnt
+	try_net "ss -lnu" ss -lnu
+	_dns_tcp="SEE_BOUNDED_DUMP"
+	_dns_udp="SEE_BOUNDED_DUMP"
 else
 	echo "NOT AVAILABLE: netstat/ss"
 fi
@@ -726,13 +1125,7 @@ else
 	echo "NOT AVAILABLE: xray"
 fi
 echo "--- xray-related chains (names only via existing list) ---"
-if have iptables; then
-	iptables -t nat -S 2>&1 | redact | grep -i -e xray -e XRAY -e BTKN_ || echo "no xray/BTKN_ tokens in nat"
-	iptables -t mangle -S 2>&1 | redact | grep -i -e xray -e XRAY -e BTKN_ || echo "no xray/BTKN_ tokens in mangle"
-	iptables -t filter -S 2>&1 | redact | grep -i -e xray -e XRAY -e BTKN_ || echo "no xray/BTKN_ tokens in filter"
-else
-	echo "NOT AVAILABLE: iptables"
-fi
+echo "see bounded iptables -S dumps above"
 
 # ----- XKEEN -----
 section "XKEEN"
@@ -762,25 +1155,9 @@ else
 	echo "NOT AVAILABLE: ps"
 fi
 echo "--- xkeen-related chains ---"
-_xkeen_nat="NOT OBSERVED"
-_xkeen_mangle="NOT OBSERVED"
-if have iptables; then
-	if iptables -t nat -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
-		_xkeen_nat="PRESENT"
-		iptables -t nat -S 2>&1 | redact | grep -i -e xkeen -e XKEEN
-	else
-		echo "no xkeen tokens in nat"
-	fi
-	if iptables -t mangle -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
-		_xkeen_mangle="PRESENT"
-		iptables -t mangle -S 2>&1 | redact | grep -i -e xkeen -e XKEEN
-	else
-		echo "no xkeen tokens in mangle"
-	fi
-	iptables -t filter -S 2>&1 | redact | grep -i -e xkeen -e XKEEN || echo "no xkeen tokens in filter"
-else
-	echo "NOT AVAILABLE: iptables"
-fi
+echo "see bounded iptables -S dumps above"
+_xkeen_nat="SEE_BOUNDED_DUMP"
+_xkeen_mangle="SEE_BOUNDED_DUMP"
 echo "--- xkeen DNS hooks (dir listing) ---"
 show_dir /opt/etc/xkeen
 show_dir /opt/etc/ndm/netfilter.d
@@ -813,9 +1190,9 @@ for _hookdir in /opt/etc/xkeen /opt/etc/ndm/netfilter.d /opt/etc/ndm/fs.d /opt/e
 done
 echo "--- xkeen-related listen ports ---"
 if have netstat; then
-	netstat -lntup 2>&1 | redact | grep -i -e xray -e xkeen || echo "no xray/xkeen listen lines"
+	try_net "netstat -lntup" netstat -lntup
 elif have ss; then
-	ss -lntup 2>&1 | redact | grep -i -e xray -e xkeen || echo "no xray/xkeen listen lines"
+	try_net "ss -lntup" ss -lntup
 else
 	echo "NOT AVAILABLE: netstat/ss"
 fi
@@ -875,9 +1252,9 @@ show_file /proc/sys/fs/file-max
 
 # ----- SOCKETS -----
 section "SOCKETS"
-try "netstat -lntup" netstat -lntup
-try "ss -lntup" ss -lntup
-try "netstat -ln" netstat -ln
+try_net "netstat -lntup" netstat -lntup
+try_net "ss -lntup" ss -lntup
+try_net "netstat -ln" netstat -ln
 
 # ----- BASELINE -----
 section "BASELINE"
@@ -955,9 +1332,38 @@ done
 echo "loaded capture-related modules (from /proc/modules; not an install):"
 if [ -r /proc/modules ]; then
 	grep -i -e tproxy -e redirect -e 'xt_mark' -e connmark -e xt_socket -e xt_set -e addrtype -e conntrack /proc/modules 2>/dev/null | redact || echo "no matching loaded modules"
+	echo "--- nf_tproxy_ipv4 / xt_TPROXY loaded? ---"
+	grep -E -i '^(xt_TPROXY|nf_tproxy_ipv4|xt_tproxy)[[:space:]]' /proc/modules 2>/dev/null | redact || echo "nf_tproxy_ipv4/xt_TPROXY: NOT OBSERVED in /proc/modules"
 else
 	echo "NOT AVAILABLE: /proc/modules"
 fi
+echo "--- command -v modprobe ---"
+if command -v modprobe >/dev/null 2>&1; then
+	echo "MODPROBE: PRESENT"
+	command -v modprobe 2>/dev/null | redact
+else
+	echo "MODPROBE: NOT AVAILABLE"
+fi
+echo "--- exact module filenames (read-only; not loaded) ---"
+for _base in xt_TPROXY.ko nf_tproxy_ipv4.ko xt_socket.ko xt_mark.ko xt_MARK.ko xt_connmark.ko xt_CONNMARK.ko xt_REDIRECT.ko ipt_REDIRECT.ko xt_set.ko xt_addrtype.ko xt_conntrack.ko; do
+	_found=0
+	for _root in "/lib/modules/${_kver}" "/lib/system-modules/${_kver}" "/opt/lib/modules" "/opt/lib/system-modules/${_kver}"; do
+		_p="${_root}/${_base}"
+		if [ -e "$_p" ]; then
+			_found=1
+			echo "FOUND: ${_p}"
+			ls -l "$_p" 2>&1 | redact
+			if [ -L "$_p" ]; then
+				echo "SYMLINK: YES ${_p}"
+			else
+				echo "SYMLINK: NO ${_p}"
+			fi
+		fi
+	done
+	if [ "$_found" -eq 0 ]; then
+		echo "NOT OBSERVED: ${_base}"
+	fi
+done
 
 # ----- SUMMARY -----
 section "SUMMARY"
@@ -1023,4 +1429,5 @@ echo "IPv6 capture (BlackTemple): UNVERIFIED (see IP6TABLES dump; not a capture 
 echo ""
 echo "===== END ====="
 echo "probe complete (read-only)"
+btkn_finish
 exit 0

@@ -138,7 +138,11 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 func (e *HybridIptablesEngine) Remove(ctx context.Context) error {
 	var first error
 	for _, c := range e.removeCommands() {
-		if _, err := e.exec.Run(ctx, c.Name, c.Args...); err != nil && !isAbsentObjectError(err) {
+		out, err := e.exec.Run(ctx, c.Name, c.Args...)
+		if err != nil {
+			if isAbsentObjectFailure(out, err) {
+				continue
+			}
 			if first == nil {
 				first = err
 			} else {
@@ -255,20 +259,25 @@ func isTableAbsent(out string, err error) bool {
 	return false
 }
 
-func isAbsentObjectError(err error) bool {
+// isAbsentObjectFailure reports idempotent absence of an owned object.
+// CommandExecutor returns CombinedOutput in output and often only
+// "exit status 1" in err, so both must be inspected. A bare exit status
+// is never treated as success.
+func isAbsentObjectFailure(output string, err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	msg := strings.ToLower(strings.TrimSpace(output + "\n" + err.Error()))
 	for _, tok := range []string{
-		"does not exist",
-		"no such file",
-		"no chain/target/match",
 		"bad rule",
+		"no chain/target/match",
 		"no matching rule",
-		"the set with the given name does not exist",
+		"does not exist",
 		"set not found",
+		"no such file or directory",
+		"no such file",
 		"fib table does not exist",
+		"no such process",
 	} {
 		if strings.Contains(msg, tok) {
 			return true

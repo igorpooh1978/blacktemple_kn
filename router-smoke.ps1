@@ -208,35 +208,79 @@ function Copy-ScriptViaSshCat {
         [Parameter(Mandatory = $true)][string]$RemotePath
     )
     $lfPath = Join-Path $env:TEMP ('btkn-upload-' + [IO.Path]::GetFileName($RemotePath))
+    $alivePath = $lfPath + '.copying'
+    $wdPath = $lfPath + '.wd.cmd'
     $probeText = [System.IO.File]::ReadAllText($LocalPath).Replace("`r`n", "`n").Replace("`r", "`n")
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($lfPath, $probeText, $utf8NoBom)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $script:SshExe
-    $psi.Arguments = Format-NativeArgs ($script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, "cat > $RemotePath"))
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $false
-    $psi.RedirectStandardError = $false
-    $psi.CreateNoWindow = $true
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $script:SshCopyStderr = ''
-    [void]$proc.Start()
-    $inBytes = [System.IO.File]::ReadAllBytes($lfPath)
-    $stdin = $proc.StandardInput.BaseStream
-    $null = $stdin.BeginWrite($inBytes, 0, $inBytes.Length, $null, $null)
-    $deadline = [datetime]::UtcNow.AddMilliseconds(60000)
-    while (-not $proc.HasExited) {
-        if ([datetime]::UtcNow -gt $deadline) {
-            cmd /c ("taskkill /F /T /PID " + $proc.Id) | Out-Null
+    $proc = $null
+    $watchdog = $null
+    try {
+        $script:SshCopyStderr = ''
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $script:SshExe
+        $psi.Arguments = Format-NativeArgs ($script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, "cat > $RemotePath"))
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $false
+        $psi.RedirectStandardError = $false
+        $psi.CreateNoWindow = $true
+        if ($env:SSH_ASKPASS) { $psi.EnvironmentVariables['SSH_ASKPASS'] = $env:SSH_ASKPASS }
+        if ($env:SSH_ASKPASS_REQUIRE) { $psi.EnvironmentVariables['SSH_ASKPASS_REQUIRE'] = $env:SSH_ASKPASS_REQUIRE }
+        if ($env:DISPLAY) { $psi.EnvironmentVariables['DISPLAY'] = $env:DISPLAY }
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        if (-not $proc.Start()) {
+            return 1
+        }
+        Start-Sleep -Seconds 3
+
+        [System.IO.File]::WriteAllText($alivePath, '1')
+        $wdBody = "@echo off`r`nping -n 16 127.0.0.1 >nul`r`nif exist `"$alivePath`" taskkill /F /T /PID $($proc.Id)`r`n"
+        [System.IO.File]::WriteAllText($wdPath, $wdBody)
+        $watchdog = Start-Process -FilePath $wdPath -WindowStyle Hidden -PassThru
+
+        $inBytes = [System.IO.File]::ReadAllBytes($lfPath)
+        $stdin = $proc.StandardInput.BaseStream
+        $iar = $stdin.BeginWrite($inBytes, 0, $inBytes.Length, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne(20000)) {
+            Stop-SshCopyProcess -Process $proc
             return 124
         }
-        Start-Sleep -Milliseconds 200
-        $proc.Refresh()
+        [void]$stdin.EndWrite($iar)
+        try { $stdin.Flush() } catch { }
+        try { $stdin.Close() } catch { }
+        try { $proc.StandardInput.Close() } catch { }
+
+        if (-not $proc.WaitForExit(30000)) {
+            Stop-SshCopyProcess -Process $proc
+            return 124
+        }
+        $script:SshCopyStderr = ''
+        return [int]$proc.ExitCode
+    } finally {
+        foreach ($p in @($alivePath, $wdPath, $lfPath)) {
+            if ($p -and (Test-Path -LiteralPath $p)) {
+                Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($watchdog) {
+            cmd /c ("taskkill /F /T /PID " + $watchdog.Id) | Out-Null
+        }
     }
-    $script:SshCopyStderr = ''
-    return [int]$proc.ExitCode
+}
+
+function Stop-SshCopyProcess {
+    param($Process)
+    if ($null -eq $Process) {
+        return
+    }
+    try {
+        $Process.Refresh()
+        if (-not $Process.HasExited) {
+            cmd /c ("taskkill /F /T /PID " + $Process.Id) | Out-Null
+        }
+    } catch { }
 }
 
 function Invoke-RemoteSh {
@@ -244,19 +288,113 @@ function Invoke-RemoteSh {
         [Parameter(Mandatory = $true)][string]$RemoteCommand,
         [int]$TimeoutMs = 180000
     )
-    $sshRun = $script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, $RemoteCommand)
-    $ErrorActionPreference = 'Continue'
-    $out = & $script:SshExe @sshRun 2>&1
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    $lines = @()
-    if ($null -ne $out) {
-        $lines = @($out | ForEach-Object { [string]$_ })
+    return Invoke-SshCapture -RemoteCommand $RemoteCommand -TimeoutMs $TimeoutMs
+}
+
+function Invoke-SshCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$RemoteCommand,
+        [int]$TimeoutMs = 180000
+    )
+    $outFile = Join-Path $env:TEMP ('btkn-sshcap-' + [guid]::NewGuid().ToString('N') + '.out')
+    $errFile = $outFile + '.err'
+    $proc = $null
+    $fs = $null
+    $fsErr = $null
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $script:SshExe
+        $psi.Arguments = Format-NativeArgs ($script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, $RemoteCommand))
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardInput = $false
+        $psi.CreateNoWindow = $true
+        if ($env:SSH_ASKPASS) { $psi.EnvironmentVariables['SSH_ASKPASS'] = $env:SSH_ASKPASS }
+        if ($env:SSH_ASKPASS_REQUIRE) { $psi.EnvironmentVariables['SSH_ASKPASS_REQUIRE'] = $env:SSH_ASKPASS_REQUIRE }
+        if ($env:DISPLAY) { $psi.EnvironmentVariables['DISPLAY'] = $env:DISPLAY }
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        if (-not $proc.Start()) {
+            return [pscustomobject]@{ ExitCode = 1; Lines = @('ssh start failed'); TimedOut = $false }
+        }
+        $fs = [System.IO.File]::Create($outFile)
+        $fsErr = [System.IO.File]::Create($errFile)
+        $tOut = $proc.StandardOutput.BaseStream.CopyToAsync($fs)
+        $tErr = $proc.StandardError.BaseStream.CopyToAsync($fsErr)
+        if (-not $proc.WaitForExit($TimeoutMs)) {
+            cmd /c ("taskkill /F /T /PID " + $proc.Id) | Out-Null
+            try { [void]$proc.WaitForExit(5000) } catch { }
+            try { if ($null -ne $fs) { $fs.Close() } } catch { }
+            try { if ($null -ne $fsErr) { $fsErr.Close() } } catch { }
+            $fs = $null
+            $fsErr = $null
+            $text = ''
+            if (Test-Path -LiteralPath $outFile) { $text += [System.IO.File]::ReadAllText($outFile) }
+            if (Test-Path -LiteralPath $errFile) { $text += [System.IO.File]::ReadAllText($errFile) }
+            $lines = @()
+            if ($text) { $lines = @($text -split "`r?`n") }
+            return [pscustomobject]@{ ExitCode = 124; Lines = $lines; TimedOut = $true }
+        }
+        try { [void]$tOut.Wait(3000) } catch { }
+        try { [void]$tErr.Wait(3000) } catch { }
+        try { $fs.Close() } catch { }
+        try { $fsErr.Close() } catch { }
+        $fs = $null
+        $fsErr = $null
+        $text = ''
+        if (Test-Path -LiteralPath $outFile) { $text += [System.IO.File]::ReadAllText($outFile) }
+        if (Test-Path -LiteralPath $errFile) { $text += [System.IO.File]::ReadAllText($errFile) }
+        $lines = @()
+        if ($text) { $lines = @($text -split "`r?`n") }
+        return [pscustomobject]@{ ExitCode = [int]$proc.ExitCode; Lines = $lines; TimedOut = $false }
+    } finally {
+        try { if ($null -ne $fs) { $fs.Close() } } catch { }
+        try { if ($null -ne $fsErr) { $fsErr.Close() } } catch { }
+        foreach ($p in @($outFile, $errFile)) {
+            if ($p -and (Test-Path -LiteralPath $p)) {
+                Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
-    return [pscustomobject]@{
-        ExitCode = $code
-        Lines    = $lines
+}
+
+function Invoke-RemoteProbeCleanup {
+    param([Parameter(Mandatory = $true)][string]$RunId)
+    $cmd = "sh /tmp/btkn-router-probe.sh --cleanup-run-id $RunId"
+    $result = Invoke-SshCapture -RemoteCommand $cmd -TimeoutMs 45000
+    $joined = (($result.Lines) -join "`n")
+    $st = ''
+    if (-not $result.TimedOut) {
+        foreach ($name in @('TIMEOUT_CLEANED', 'TIMEOUT_CLEANUP_FAILED', 'REMOTE_PROCESS_NOT_FOUND', 'REMOTE_PROCESS_FOREIGN')) {
+            if ($joined -match [regex]::Escape($name)) {
+                $st = $name
+                break
+            }
+        }
     }
+    if ($st -eq 'TIMEOUT_CLEANED') {
+        Write-Host $st
+        return $st
+    }
+    $orphan = Invoke-SshCapture -RemoteCommand 'sh /tmp/btkn-router-probe.sh --cleanup-orphans' -TimeoutMs 45000
+    $oj = (($orphan.Lines) -join "`n")
+    if ($orphan.TimedOut -or $orphan.ExitCode -eq 124) {
+        Write-Host 'TIMEOUT_CLEANUP_FAILED'
+        return 'TIMEOUT_CLEANUP_FAILED'
+    }
+    foreach ($name in @('TIMEOUT_CLEANED', 'TIMEOUT_CLEANUP_FAILED', 'REMOTE_PROCESS_NOT_FOUND', 'REMOTE_PROCESS_FOREIGN')) {
+        if ($oj -match [regex]::Escape($name)) {
+            Write-Host $name
+            return $name
+        }
+    }
+    if ($st) {
+        Write-Host $st
+        return $st
+    }
+    Write-Host 'TIMEOUT_CLEANUP_FAILED'
+    return 'TIMEOUT_CLEANUP_FAILED'
 }
 
 function Invoke-GatedRemote {
@@ -366,12 +504,14 @@ if (-not (Test-Path -LiteralPath $probeLocal)) {
 }
 
 $remoteScript = '/tmp/btkn-router-probe.sh'
+$probeRunId = 'r' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString() + ('{0:D6}' -f (Get-Random -Maximum 999999))
+Write-Host "probe_run_id=$probeRunId"
 Write-Host 'copying read-only probe via ssh cat (no SFTP)'
-    $copyCode = Copy-ScriptViaSshCat -LocalPath $probeLocal -RemotePath $remoteScript
-    if ($copyCode -ne 0) {
-        if ($script:SshCopyStderr) {
-            Write-Host ($script:SshCopyStderr.Trim())
-        }
+$copyCode = Copy-ScriptViaSshCat -LocalPath $probeLocal -RemotePath $remoteScript
+if ($copyCode -ne 0) {
+    if ($script:SshCopyStderr) {
+        Write-Host ($script:SshCopyStderr.Trim())
+    }
     $idPath = Resolve-IdentityPath
     $usePassword = -not [string]::IsNullOrEmpty($env:BTKN_SSH_PASSWORD)
     if (-not $idPath -and -not $usePassword) {
@@ -383,24 +523,52 @@ Write-Host 'copying read-only probe via ssh cat (no SFTP)'
     exit 0
 }
 
+Write-Host 'reaping leftover BTKN probe process trees (owned script path only)'
+$orphanPre = Invoke-SshCapture -RemoteCommand "sh $remoteScript --cleanup-orphans" -TimeoutMs 45000
+foreach ($line in @($orphanPre.Lines)) { Write-Host $line }
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $traceDir = Join-Path $PSScriptRoot '.research-local\hardware'
 New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
 $rawPath = Join-Path $traceDir "kn1011-probe-$stamp.txt"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$snapCmd = 'echo BEFORE; cat /proc/uptime 2>/dev/null; cat /proc/loadavg 2>/dev/null; echo ---btkn-procs---; ps w 2>/dev/null | grep btkn-router-probe || echo none; echo ---owned-env---; n=0; for e in /proc/[0-9]*/environ; do grep -q BTKN_PROBE_RUN_ID "$e" 2>/dev/null || continue; n=$((n+1)); done; echo owned_count=$n; echo ---lock---; if [ -d /tmp/btkn-router-probe.lock ]; then echo present; cat /tmp/btkn-router-probe.lock/meta 2>/dev/null; else echo absent; fi'
+Write-Host '--- host snapshot BEFORE probe ---'
+$before = Invoke-SshCapture -RemoteCommand $snapCmd -TimeoutMs 20000
+foreach ($line in @($before.Lines)) { Write-Host $line }
 
-$run = Invoke-RemoteSh -RemoteCommand "sh $remoteScript"
+$probeCmd = "BTKN_PROBE_RUN_ID=$probeRunId BTKN_PROBE_MAX_SEC=180 sh $remoteScript"
+$run = Invoke-SshCapture -RemoteCommand $probeCmd -TimeoutMs 240000
 $probeLines = @($run.Lines)
 [System.IO.File]::WriteAllLines($rawPath, $probeLines, $utf8NoBom)
 foreach ($line in $probeLines) {
     Write-Host $line
 }
 
+if ($run.TimedOut -or $run.ExitCode -eq 124) {
+    Write-Host 'local SSH probe TIMEOUT; terminating ssh tree and cleaning remote owned probe'
+    $cleanSt = Invoke-RemoteProbeCleanup -RunId $probeRunId
+    Write-Host "remote cleanup: $cleanSt"
+    Write-ProbeNotRun -Reason "ssh probe TIMEOUT ($cleanSt)"
+    Write-Host "RAW TRACE: $rawPath"
+    exit 0
+}
+
 if ($run.ExitCode -ne 0) {
+    $joined = (($probeLines) -join "`n")
+    if ($joined -notmatch 'ALREADY_RUNNING') {
+        $cleanSt = Invoke-RemoteProbeCleanup -RunId $probeRunId
+        Write-Host "remote cleanup after non-zero exit: $cleanSt"
+    }
     Write-ProbeNotRun -Reason "ssh probe failed (exit $($run.ExitCode)); connection or remote shell"
     Write-Host "RAW TRACE: $rawPath"
     exit 0
 }
+
+Write-Host '--- host snapshot AFTER probe ---'
+$afterSnap = $snapCmd.Replace('BEFORE', 'AFTER')
+$after = Invoke-SshCapture -RemoteCommand $afterSnap -TimeoutMs 20000
+foreach ($line in @($after.Lines)) { Write-Host $line }
 
 Write-Host 'REAL KN-1011 PROBE: RUN'
 Write-Host "RAW TRACE: $rawPath (gitignored)"

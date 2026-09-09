@@ -17,3 +17,6 @@
 ```text
 .ai/reports/<wave>-<task>-<yyyymmdd>.md
 ```
+
+Gherkin: каждый P0 scenario ID должен указывать executable test в `features/scenario-map.json`.
+`go run ./tools/gherkincheck` — обязательный CI gate. RED proof не выдумывать.

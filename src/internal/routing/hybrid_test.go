@@ -309,6 +309,49 @@ func TestDoubleRemove(t *testing.T) {
 	}
 }
 
+func TestIsAbsentObjectFailureRealisticExitError(t *testing.T) {
+	badRule := "iptables: Bad rule (does a matching rule exist in that chain?)."
+	exit1 := errors.New("exit status 1")
+	if !isAbsentObjectFailure(badRule, exit1) {
+		t.Fatal("Bad rule in CombinedOutput + exit status 1 must be absent/acceptable")
+	}
+	if isAbsentObjectFailure("Permission denied", exit1) {
+		t.Fatal("Permission denied + exit status 1 must not be classified absent")
+	}
+	if isAbsentObjectFailure("", exit1) {
+		t.Fatal("bare exit status 1 must not be classified absent")
+	}
+}
+
+func TestRemovePermissionDeniedIsIncomplete(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.failPermission = true
+	fx.natS = "-A PREROUTING -j BTKN_PRE"
+	fx.mangleS = "-A PREROUTING -j BTKN_PRE"
+	eng := newTestEngine(t, fx)
+	err := eng.Remove(context.Background())
+	if err == nil {
+		t.Fatal("Permission denied cleanup must fail")
+	}
+	if !errors.Is(err, ErrCleanupIncomplete) {
+		t.Fatalf("got %v want ErrCleanupIncomplete", err)
+	}
+}
+
+func TestReconcileFromCleanSystem(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssOut = `tcp LISTEN 0 128 0.0.0.0:11820 0.0.0.0:* users:(("xray",pid=99,fd=8))`
+	fx.exeByPID = map[int]string{99: OurXrayExecutable}
+	eng := newTestEngine(t, fx)
+	eng.SetExpectedListener(ExpectedListener{Executable: OurXrayExecutable, PID: 99})
+	if err := eng.Reconcile(context.Background(), true); err != nil {
+		t.Fatalf("clean desired Reconcile must Remove absent then Apply, got %v", err)
+	}
+	if !eng.applied {
+		t.Fatal("desired reconcile from clean system must Apply")
+	}
+}
+
 func TestPartialApplyRollback(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.failAtMut = 3
@@ -604,6 +647,53 @@ func TestReconcileNDMPartialLeftovers(t *testing.T) {
 		eng := newTestEngine(t, fx)
 		if err := eng.Reconcile(context.Background(), true); err != nil {
 			t.Fatal(err)
+		}
+	})
+	t.Run("only PREROUTING jump", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.natS = "-A PREROUTING -j BTKN_PRE"
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("only table exists", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.tableOut = "local default dev lo scope host"
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("only fwmark rule exists", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.ipRule = "from all fwmark 0x42544b4e lookup 4254"
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("only ipset exists", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.ipsetPresent = true
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+		if !callsHaveSeq(fx.snapshot(), "destroy", SetClientsV4) {
+			t.Fatal("Reconcile must destroy leftover owned ipset")
+		}
+	})
+	t.Run("only chains exist", func(t *testing.T) {
+		fx := newFakeExecutor()
+		fx.natS = "-N BTKN_PRE\n-N BTKN_TCP"
+		fx.mangleS = "-N BTKN_PRE\n-N BTKN_UDP"
+		eng := newTestEngine(t, fx)
+		if err := eng.Reconcile(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+		if !callsHaveSeq(fx.snapshot(), "-X", ChainPRE) {
+			t.Fatal("Reconcile must delete leftover owned chains")
 		}
 	})
 }

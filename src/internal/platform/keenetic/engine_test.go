@@ -10,9 +10,10 @@ import (
 )
 
 type fakeRunner struct {
-	mu    sync.Mutex
-	files map[string]string
-	cmds  map[string]cmdResult
+	mu       sync.Mutex
+	files    map[string]string
+	cmds     map[string]cmdResult
+	symlinks map[string]string
 }
 
 type cmdResult struct {
@@ -22,8 +23,9 @@ type cmdResult struct {
 
 func newFakeRunner() *fakeRunner {
 	return &fakeRunner{
-		files: map[string]string{},
-		cmds:  map[string]cmdResult{},
+		files:    map[string]string{},
+		cmds:     map[string]cmdResult{},
+		symlinks: map[string]string{},
 	}
 }
 
@@ -31,18 +33,48 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	key := strings.Join(append([]string{name}, args...), " ")
-	if name == "test" && len(args) == 2 && args[0] == "-e" {
-		_, ok := f.files[args[1]]
-		if ok {
-			return "", nil
+	if name == "test" && len(args) == 2 {
+		p := args[1]
+		switch args[0] {
+		case "-e":
+			if _, ok := f.files[p]; ok {
+				return "", nil
+			}
+			if _, ok := f.symlinks[p]; ok {
+				return "", nil
+			}
+			return "", errMissing
+		case "-L":
+			if _, ok := f.symlinks[p]; ok {
+				return "", nil
+			}
+			return "", errMissing
+		case "-f":
+			if _, ok := f.symlinks[p]; ok {
+				return "", errMissing
+			}
+			if _, ok := f.files[p]; ok {
+				return "", nil
+			}
+			return "", errMissing
 		}
-		return "", errMissing
 	}
 	if name == "cat" && len(args) == 1 {
 		if v, ok := f.files[args[0]]; ok {
 			return v, nil
 		}
 		return "", errMissing
+	}
+	if name == "command" && len(args) == 2 && args[0] == "-v" {
+		if res, ok := f.cmds[key]; ok {
+			return res.out, res.err
+		}
+		if args[1] == "modprobe" {
+			if _, ok := f.files["/sbin/modprobe"]; ok {
+				return "/sbin/modprobe", nil
+			}
+			return "", errMissing
+		}
 	}
 	if res, ok := f.cmds[key]; ok {
 		return res.out, res.err
@@ -175,11 +207,94 @@ func hasArg(args []string, tok string) bool {
 }
 
 func TestValidateModulePath(t *testing.T) {
-	if err := validateModulePath("/tmp/evil.ko"); err == nil {
-		t.Fatal("escaped path must fail")
+	cases := []struct {
+		path string
+		ok   bool
+	}{
+		{"/lib/modules/4.9-ndm-5/xt_TPROXY.ko", true},
+		{"/lib/modules-evil/xt_TPROXY.ko", false},
+		{"/tmp/xt_TPROXY.ko", false},
+		{"/opt/lib/modules/../../tmp/xt_TPROXY.ko", false},
+		{"/lib/modules/4.9-ndm-5/evil.ko", false},
 	}
-	if err := validateModulePath("/lib/modules/4.9-ndm-5/xt_TPROXY.ko"); err != nil {
-		t.Fatal(err)
+	for _, tc := range cases {
+		err := validateModulePath(tc.path)
+		if tc.ok && err != nil {
+			t.Fatalf("%s: want allow, got %v", tc.path, err)
+		}
+		if !tc.ok && err == nil {
+			t.Fatalf("%s: want reject", tc.path)
+		}
+	}
+}
+
+func TestLoadAllowlistedRejectsSymlink(t *testing.T) {
+	f := newFakeRunner()
+	p := "/lib/modules/4.9-ndm-5/xt_TPROXY.ko"
+	f.symlinks[p] = "/tmp/evil.ko"
+	err := loadAllowlisted(context.Background(), f, p)
+	if err == nil {
+		t.Fatal("symlink under allowed root must be rejected")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLoadAllowlistedRejectsNonRegular(t *testing.T) {
+	f := newFakeRunner()
+	p := "/lib/modules/4.9-ndm-5/xt_TPROXY.ko"
+	err := loadAllowlisted(context.Background(), f, p)
+	if err == nil {
+		t.Fatal("missing/non-regular module must be rejected")
+	}
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPrepareFailsWhenInsmodOrderUnverified(t *testing.T) {
+	f := newFakeRunner()
+	f.files["/opt/sbin/ip"] = ""
+	f.files["/opt/sbin/iptables"] = ""
+	f.files["/opt/sbin/ipset"] = ""
+	f.files["/proc/net/ip_tables_targets"] = "REDIRECT MARK CONNMARK"
+	f.files["/proc/net/ip_tables_matches"] = "socket set addrtype conntrack"
+	f.files["/proc/modules"] = "xt_socket"
+	f.files["/proc/sys/kernel/osrelease"] = "4.9-ndm-5"
+	f.files["/lib/modules/4.9-ndm-5/xt_TPROXY.ko"] = ""
+	f.cmds["ip -4 rule show"] = cmdResult{out: "0:\tfrom all lookup local\n", err: nil}
+	f.cmds["ipset --version"] = cmdResult{out: "ipset v7", err: nil}
+	var sawInsmod, sawIPT, sawSysctl, sawOpkgMut, sawRmmod bool
+	wrapped := &recordingRunner{inner: f, onRun: func(name string, args []string) {
+		if name == "insmod" {
+			sawInsmod = true
+		}
+		if name == "iptables" {
+			sawIPT = true
+		}
+		if name == "sysctl" {
+			sawSysctl = true
+		}
+		if name == "opkg" && len(args) > 0 {
+			switch args[0] {
+			case "install", "remove", "update", "upgrade":
+				sawOpkgMut = true
+			}
+		}
+		if name == "rmmod" {
+			sawRmmod = true
+		}
+	}}
+	_, err := Prepare(context.Background(), wrapped)
+	if err == nil {
+		t.Fatal("Prepare must fail without verified insmod order")
+	}
+	if !strings.Contains(err.Error(), InsmodOrderUnverified) {
+		t.Fatalf("got %v", err)
+	}
+	if sawInsmod || sawIPT || sawSysctl || sawOpkgMut || sawRmmod {
+		t.Fatal("failed Prepare must not mutate routing, sysctl, packages, or unload modules")
 	}
 }
 

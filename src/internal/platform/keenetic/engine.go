@@ -49,14 +49,16 @@ type PackageRecord struct {
 
 // Report is Detect/Verify output. Prepare never installs capture.
 type Report struct {
-	XKeenInstalled bool
-	TUNChardev     bool
-	Engine         EngineKind
-	Capabilities   []Capability
-	Packages       []PackageRecord
-	UserlandOK     bool
-	HybridOK       bool
-	PrepareNeeded  bool
+	XKeenInstalled  bool
+	TUNChardev      bool
+	Engine          EngineKind
+	Capabilities    []Capability
+	Packages        []PackageRecord
+	UserlandOK      bool
+	HybridOK        bool
+	PrepareNeeded   bool
+	ModprobePresent bool
+	InsmodStrategy  string
 }
 
 // Detect is read-only. It does not load modules or touch iptables policy.
@@ -135,6 +137,15 @@ func inspect(ctx context.Context, r Runner) (Report, error) {
 	rep.HybridOK = hybrid
 	rep.PrepareNeeded = prepare && !hybrid
 	rep.Engine = SelectEngine(rep)
+	rep.ModprobePresent = probeModprobe(ctx, r)
+	switch {
+	case !rep.PrepareNeeded:
+		rep.InsmodStrategy = InsmodNotNeeded
+	case rep.ModprobePresent:
+		rep.InsmodStrategy = InsmodModprobe
+	default:
+		rep.InsmodStrategy = InsmodOrderUnverified
+	}
 	return rep, ctx.Err()
 }
 
@@ -192,14 +203,14 @@ func cat(ctx context.Context, r Runner, p string) string {
 }
 
 func probeTarget(ctx context.Context, r Runner, name string) Capability {
-	return probeToken(ctx, r, name, "/proc/net/ip_tables_targets", "xt_"+name)
+	return probeToken(ctx, r, name, "/proc/net/ip_tables_targets")
 }
 
 func probeMatch(ctx context.Context, r Runner, name string) Capability {
-	return probeToken(ctx, r, name, "/proc/net/ip_tables_matches", "xt_"+name)
+	return probeToken(ctx, r, name, "/proc/net/ip_tables_matches")
 }
 
-func probeToken(ctx context.Context, r Runner, name, procFile, modBase string) Capability {
+func probeToken(ctx context.Context, r Runner, name, procFile string) Capability {
 	c := Capability{Name: name, Origin: "KERNEL/UNKNOWN"}
 	blob := cat(ctx, r, procFile)
 	mods := strings.ToLower(cat(ctx, r, "/proc/modules"))
@@ -207,13 +218,12 @@ func probeToken(ctx context.Context, r Runner, name, procFile, modBase string) C
 		c.Present = true
 		c.Loaded = true
 	}
-	lowBase := strings.ToLower(modBase)
 	lowName := strings.ToLower(name)
-	if strings.Contains(mods, lowBase) || strings.Contains(mods, "ipt_"+lowName) || strings.Contains(mods, "xt_"+lowName) {
+	if strings.Contains(mods, "ipt_"+lowName) || strings.Contains(mods, "xt_"+lowName) {
 		c.Present = true
 		c.Loaded = true
 	}
-	mod := findModule(ctx, r, allowlistedBasenames(modBase, name))
+	mod := findModule(ctx, r, moduleCandidateBasenames(name))
 	if mod.path != "" {
 		c.ModuleFile = path.Base(mod.path)
 		c.Path = mod.path
@@ -295,13 +305,28 @@ func packageNameForTool(tool string) string {
 	}
 }
 
-func allowlistedBasenames(modBase, name string) []string {
-	return []string{
-		modBase + ".ko",
-		"xt_" + name + ".ko",
-		"ipt_" + name + ".ko",
-		"nf_tproxy_ipv4.ko",
+// moduleBasenames maps HybridRequirements capabilities to evidence-backed
+// .ko filenames. No "xt_"+capability heuristic: MARK/CONNMARK case differs
+// across trees. Aliases here are only names that exist on xtables/Keenetic
+// or are required TPROXY dependencies (nf_tproxy_ipv4).
+var moduleBasenames = map[string][]string{
+	"TPROXY":    {"xt_TPROXY.ko", "nf_tproxy_ipv4.ko"},
+	"REDIRECT":  {"xt_REDIRECT.ko", "ipt_REDIRECT.ko"},
+	"MARK":      {"xt_mark.ko", "xt_MARK.ko"},
+	"CONNMARK":  {"xt_connmark.ko", "xt_CONNMARK.ko"},
+	"socket":    {"xt_socket.ko"},
+	"set":       {"xt_set.ko"},
+	"addrtype":  {"xt_addrtype.ko"},
+	"conntrack": {"xt_conntrack.ko"},
+}
+
+func moduleCandidateBasenames(name string) []string {
+	if aliases, ok := moduleBasenames[name]; ok {
+		out := make([]string, len(aliases))
+		copy(out, aliases)
+		return out
 	}
+	return nil
 }
 
 type modHit struct {
@@ -322,8 +347,8 @@ func findModule(ctx context.Context, r Runner, names []string) modHit {
 		"/opt/lib/modules",
 		"/opt/lib/system-modules/" + release,
 	}
-	for _, root := range roots {
-		for _, base := range names {
+	for _, base := range names {
+		for _, root := range roots {
 			p := strings.TrimSuffix(root, "/") + "/" + base
 			if fileExists(ctx, r, p) {
 				owner, _ := r.Run(ctx, "opkg", "search", p)
@@ -334,8 +359,31 @@ func findModule(ctx context.Context, r Runner, names []string) modHit {
 	return modHit{}
 }
 
-// Prepare loads allowlisted existing kernel modules. It never applies BTKN
-// capture, never installs packages, never writes sysctl, never unloads modules.
+const (
+	InsmodNotNeeded       = "NOT_NEEDED"
+	InsmodModprobe        = "MODPROBE"
+	InsmodOrderUnverified = "DEPENDENCY_ORDER_UNVERIFIED"
+)
+
+// ErrInsmodOrderUnverified is returned when Prepare would need insmod but
+// no safe explicit dependency order is proven and modprobe is absent.
+var ErrInsmodOrderUnverified = errors.New("keenetic: INSMOD PREPARE: DEPENDENCY_ORDER_UNVERIFIED")
+
+func probeModprobe(ctx context.Context, r Runner) bool {
+	if _, err := r.Run(ctx, "command", "-v", "modprobe"); err == nil {
+		return true
+	}
+	for _, p := range []string{"/sbin/modprobe", "/usr/sbin/modprobe", "/bin/modprobe", "/opt/sbin/modprobe"} {
+		if fileExists(ctx, r, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// Prepare loads allowlisted existing kernel modules via modprobe only.
+// It never applies BTKN capture, never installs packages, never writes
+// sysctl, never unloads modules, and never guesses insmod order.
 func Prepare(ctx context.Context, r Runner) (Report, error) {
 	if r == nil {
 		return Report{}, errors.New("keenetic: nil runner")
@@ -346,6 +394,9 @@ func Prepare(ctx context.Context, r Runner) (Report, error) {
 	}
 	if before.Engine == EngineHybridReady {
 		return Verify(ctx, r)
+	}
+	if before.PrepareNeeded && !before.ModprobePresent {
+		return before, ErrInsmodOrderUnverified
 	}
 	for _, c := range before.Capabilities {
 		if c.Present && c.Loaded {
@@ -362,51 +413,81 @@ func Prepare(ctx context.Context, r Runner) (Report, error) {
 }
 
 func loadAllowlisted(ctx context.Context, r Runner, modulePath string) error {
-	base := path.Base(modulePath)
-	if !allowlistedModule(base) {
-		return fmt.Errorf("keenetic: module %s is not allowlisted", base)
-	}
-	if err := validateModulePath(modulePath); err != nil {
+	if err := validateModuleFile(ctx, r, modulePath); err != nil {
 		return err
 	}
-	if _, err := r.Run(ctx, "modprobe", strings.TrimSuffix(base, ".ko")); err == nil {
-		return nil
-	}
-	_, err := r.Run(ctx, "insmod", modulePath)
+	base := path.Base(path.Clean(modulePath))
+	_, err := r.Run(ctx, "modprobe", strings.TrimSuffix(base, ".ko"))
 	return err
 }
 
+func validateModuleFile(ctx context.Context, r Runner, modulePath string) error {
+	if err := validateModulePath(modulePath); err != nil {
+		return err
+	}
+	clean := path.Clean(modulePath)
+	if isSymlink(ctx, r, clean) {
+		return fmt.Errorf("keenetic: module symlink rejected: %s", clean)
+	}
+	if !isRegularFile(ctx, r, clean) {
+		return fmt.Errorf("keenetic: module is not a regular file: %s", clean)
+	}
+	return nil
+}
+
+func isSymlink(ctx context.Context, r Runner, p string) bool {
+	_, err := r.Run(ctx, "test", "-L", p)
+	return err == nil
+}
+
+func isRegularFile(ctx context.Context, r Runner, p string) bool {
+	_, err := r.Run(ctx, "test", "-f", p)
+	return err == nil
+}
+
 func allowlistedModule(base string) bool {
-	switch base {
-	case "xt_TPROXY.ko", "xt_socket.ko", "xt_mark.ko", "xt_CONNMARK.ko", "xt_set.ko",
-		"xt_addrtype.ko", "xt_conntrack.ko", "xt_REDIRECT.ko", "ipt_REDIRECT.ko",
-		"nf_tproxy_ipv4.ko", "xt_MARK.ko":
-		return true
-	default:
+	for _, names := range moduleBasenames {
+		for _, n := range names {
+			if n == base {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var knownModuleRoots = []string{
+	"/lib/modules",
+	"/lib/system-modules",
+	"/opt/lib/modules",
+	"/opt/lib/system-modules",
+}
+
+func pathInsideRoot(clean, root string) bool {
+	root = path.Clean(root)
+	if root == "." || root == "/" {
 		return false
 	}
+	return clean == root || strings.HasPrefix(clean, root+"/")
 }
 
 func validateModulePath(p string) error {
 	if p == "" || strings.Contains(p, "\x00") {
 		return errors.New("keenetic: empty module path")
 	}
-	clean := path.Clean(p)
-	if clean != p && !strings.HasPrefix(p, "/opt/lib/modules") {
-		// Clean may collapse //; still require a known root.
+	if !strings.HasPrefix(p, "/") {
+		return errors.New("keenetic: module path must be absolute")
 	}
+	clean := path.Clean(p)
 	ok := false
-	for _, root := range []string{"/lib/modules/", "/lib/system-modules/", "/opt/lib/modules", "/opt/lib/system-modules/"} {
-		if strings.HasPrefix(clean, strings.TrimSuffix(root, "/")) || strings.HasPrefix(clean, root) {
+	for _, root := range knownModuleRoots {
+		if pathInsideRoot(clean, root) {
 			ok = true
 			break
 		}
 	}
 	if !ok {
 		return fmt.Errorf("keenetic: module path %s escapes known roots", p)
-	}
-	if strings.Contains(clean, "/../") {
-		return errors.New("keenetic: module path escapes via ..")
 	}
 	if !allowlistedModule(path.Base(clean)) {
 		return errors.New("keenetic: basename not allowlisted")

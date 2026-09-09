@@ -90,11 +90,14 @@ func TestProbeScriptReadOnly(t *testing.T) {
 		regexp.MustCompile(`sysctl[[:space:]]+-w\b`),
 		regexp.MustCompile(`echo[[:space:]].*>[[:space:]]*/proc/sys`),
 		regexp.MustCompile(`echo[[:space:]].*>[[:space:]]*/sys/fs/cgroup`),
-		regexp.MustCompile(`(?m)(^|[[:space:];|&])kill[[:space:]]`),
 		regexp.MustCompile(`(?m)(^|[[:space:];|&])killall[[:space:]]`),
+		regexp.MustCompile(`(?m)(^|[[:space:];|&])pkill[[:space:]]`),
 		regexp.MustCompile(`\bswapon\b`),
 		regexp.MustCompile(`\bswapoff\b`),
 		regexp.MustCompile(`opkg[[:space:]]+(install|remove|upgrade|update)\b`),
+		regexp.MustCompile(`(?m)(^|[[:space:];|&])insmod[[:space:]]`),
+		regexp.MustCompile(`(?m)(^|[[:space:];|&])rmmod[[:space:]]`),
+		regexp.MustCompile(`(?m)(^|[[:space:];|&])modprobe[[:space:]]+[A-Za-z]`),
 		regexp.MustCompile(`service[[:space:]]+restart\b`),
 		regexp.MustCompile(`/etc/init\.d/\S+[[:space:]]+restart\b`),
 		regexp.MustCompile(`xkeen[[:space:]]+-(dns|pbr|pr|ipv6)\b`),
@@ -318,6 +321,70 @@ func TestHardwareDocsNeverClaimTPROXYSupported(t *testing.T) {
 		if claim.MatchString(s) {
 			t.Errorf("%s must not write TPROXY as SUPPORTED", filepath.Join(rel...))
 		}
+	}
+}
+
+func TestCopyScriptViaSshCatClosesStdin(t *testing.T) {
+	ps1 := readRepoFile(t, "router-smoke.ps1")
+	if !strings.Contains(ps1, "function Copy-ScriptViaSshCat") {
+		t.Fatal("Copy-ScriptViaSshCat not found")
+	}
+	if strings.Contains(ps1, "BeginWrite") {
+		if !strings.Contains(ps1, "EndWrite") {
+			t.Fatal("BeginWrite without EndWrite is forbidden")
+		}
+		if strings.Index(ps1, "EndWrite") < strings.Index(ps1, "BeginWrite") {
+			t.Fatal("EndWrite must follow BeginWrite")
+		}
+		if !strings.Contains(ps1, "StandardInput.Close") {
+			t.Fatal("BeginWrite path must Close StandardInput so remote cat receives EOF")
+		}
+	} else if !strings.Contains(ps1, " < ") && !strings.Contains(ps1, "StandardInput.Close") {
+		t.Fatal("upload must close stdin so remote cat receives EOF")
+	}
+	if !strings.Contains(ps1, "RedirectStandardOutput = $false") && !strings.Contains(ps1, "RedirectStandardOutput=$false") {
+		t.Fatal("upload must not redirect stdout into an unread pipe")
+	}
+	if !strings.Contains(ps1, "RedirectStandardError = $false") && !strings.Contains(ps1, "RedirectStandardError=$false") {
+		t.Fatal("upload must not redirect stderr into an unread pipe")
+	}
+	if !strings.Contains(ps1, "taskkill /F /T") {
+		t.Fatal("timeout must terminate ssh process tree")
+	}
+	if !strings.Contains(ps1, "Remove-Item") {
+		t.Fatal("must delete local temporary upload file")
+	}
+	for _, want := range []string{
+		"TIMEOUT_CLEANED",
+		"TIMEOUT_CLEANUP_FAILED",
+		"REMOTE_PROCESS_NOT_FOUND",
+		"REMOTE_PROCESS_FOREIGN",
+		"--cleanup-run-id",
+		"--cleanup-orphans",
+		"BTKN_PROBE_RUN_ID",
+	} {
+		if !strings.Contains(ps1, want) {
+			t.Fatalf("ssh timeout cleanup missing %q", want)
+		}
+	}
+}
+
+func TestProbeRecordsModprobePresence(t *testing.T) {
+	s := readProbeScript(t)
+	if !strings.Contains(s, `command -v modprobe`) {
+		t.Fatal("probe must record command -v modprobe")
+	}
+	if !strings.Contains(s, "MODPROBE: PRESENT") || !strings.Contains(s, "MODPROBE: NOT AVAILABLE") {
+		t.Fatal("probe must print MODPROBE: PRESENT or NOT AVAILABLE")
+	}
+	if !strings.Contains(s, "xt_mark.ko") || !strings.Contains(s, "xt_MARK.ko") {
+		t.Fatal("probe must look up both MARK filename cases")
+	}
+	if !strings.Contains(s, "xt_connmark.ko") || !strings.Contains(s, "xt_CONNMARK.ko") {
+		t.Fatal("probe must look up both CONNMARK filename cases")
+	}
+	if !strings.Contains(s, "nf_tproxy_ipv4") {
+		t.Fatal("probe must look up nf_tproxy_ipv4")
 	}
 }
 
