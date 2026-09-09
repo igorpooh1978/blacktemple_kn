@@ -17,6 +17,10 @@
 
 .PARAMETER IdentityFile
   SSH private key path. Env: BTKN_SSH_IDENTITY.
+
+  Optional local .env (gitignored): BTKN_ROUTER, BTKN_SSH_USER, BTKN_SSH_PASSWORD,
+  BTKN_SSH_PORT, BTKN_SSH_IDENTITY. Password auth uses SSH_ASKPASS; the secret
+  is not placed on the ssh/scp command line.
 #>
 [CmdletBinding()]
 param(
@@ -37,6 +41,45 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Import-DotEnv {
+    $path = Join-Path $PSScriptRoot '.env'
+    if (-not (Test-Path -LiteralPath $path)) {
+        return
+    }
+    Get-Content -LiteralPath $path | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -eq '' -or $line.StartsWith('#')) {
+            return
+        }
+        $eq = $line.IndexOf('=')
+        if ($eq -lt 1) {
+            return
+        }
+        $name = $line.Substring(0, $eq).Trim()
+        $value = $line.Substring($eq + 1).Trim()
+        if ($value.Length -ge 2) {
+            $q = $value[0]
+            if (($q -eq [char]'"' -or $q -eq [char]"'") -and $value[-1] -eq $q) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+        }
+        if ($name) {
+            Set-Item -Path ("Env:" + $name) -Value $value
+        }
+    }
+}
+
+Import-DotEnv
+if (-not $RouterAddress -and $env:BTKN_ROUTER) {
+    $RouterAddress = $env:BTKN_ROUTER
+}
+if ($env:BTKN_SSH_USER) {
+    $SshUser = $env:BTKN_SSH_USER
+}
+if (-not $IdentityFile -and $env:BTKN_SSH_IDENTITY) {
+    $IdentityFile = $env:BTKN_SSH_IDENTITY
+}
 
 function Get-OpenSshTool {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -85,9 +128,8 @@ if ($Mode -eq 'Smoke') {
 
 # Mode Probe
 $sshExe = Get-OpenSshTool -Name 'ssh.exe'
-$scpExe = Get-OpenSshTool -Name 'scp.exe'
-if (-not $sshExe -or -not $scpExe) {
-    Write-ProbeNotRun -Reason 'ssh.exe/scp.exe not found (Windows OpenSSH required)'
+if (-not $sshExe) {
+    Write-ProbeNotRun -Reason 'ssh.exe not found (Windows OpenSSH required)'
     exit 0
 }
 
@@ -102,6 +144,7 @@ $port = 22
 if ($env:BTKN_SSH_PORT) {
     $port = [int]$env:BTKN_SSH_PORT
 }
+$usePassword = -not [string]::IsNullOrEmpty($env:BTKN_SSH_PASSWORD)
 
 $probeLocal = Join-Path $PSScriptRoot 'scripts\router-probe.sh'
 if (-not (Test-Path -LiteralPath $probeLocal)) {
@@ -110,35 +153,87 @@ if (-not (Test-Path -LiteralPath $probeLocal)) {
 }
 
 $sshArgs = @(
-    '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=15',
     '-o', 'StrictHostKeyChecking=accept-new'
 )
+if ($usePassword) {
+    $askPass = Join-Path $env:TEMP 'btkn-ssh-askpass.cmd'
+    $askBody = "@echo off`r`necho(%BTKN_SSH_PASSWORD%"
+    [System.IO.File]::WriteAllText($askPass, $askBody)
+    $env:SSH_ASKPASS = $askPass
+    $env:SSH_ASKPASS_REQUIRE = 'force'
+    $env:DISPLAY = 'localhost:0'
+    $sshArgs += @(
+        '-o', 'BatchMode=no',
+        '-o', 'PreferredAuthentications=password,keyboard-interactive',
+        '-o', 'PubkeyAuthentication=no',
+        '-o', 'PasswordAuthentication=yes',
+        '-o', 'KbdInteractiveAuthentication=yes',
+        '-o', 'NumberOfPasswordPrompts=1'
+    )
+    Write-Host 'auth=password (SSH_ASKPASS; secret not on argv)'
+} else {
+    $sshArgs += @('-o', 'BatchMode=yes')
+    Write-Host 'auth=key/agent (BatchMode)'
+}
 if ($idPath) {
     $sshArgs += @('-i', $idPath, '-o', 'IdentitiesOnly=yes')
 }
-$scpArgs = @($sshArgs)
 $sshArgs += @('-p', [string]$port)
-$scpArgs += @('-P', [string]$port)
 
 $remoteScript = '/tmp/btkn-router-probe.sh'
-$remoteTarget = "${SshUser}@${RouterAddress}:${remoteScript}"
 
 $lfPath = Join-Path $env:TEMP 'btkn-router-probe.sh'
 $probeText = [System.IO.File]::ReadAllText($probeLocal).Replace("`r`n", "`n").Replace("`r", "`n")
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($lfPath, $probeText, $utf8NoBom)
 
-Write-Host 'copying read-only probe via scp.exe'
-$scpAll = $scpArgs + @($lfPath, $remoteTarget)
-& $scpExe @scpAll
-if ($LASTEXITCODE -ne 0) {
-    if (-not $idPath) {
+function Format-NativeArgs {
+    param([string[]]$Parts)
+    return (($Parts | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + ($_ -replace '"', '\"') + '"'
+        } else {
+            $_
+        }
+    }) -join ' ')
+}
+
+function Copy-ProbeViaSshCat {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $sshExe
+    $psi.Arguments = Format-NativeArgs ($sshArgs + @('-l', $SshUser, $RouterAddress, "cat > $remoteScript"))
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $inBytes = [System.IO.File]::ReadAllBytes($lfPath)
+    $proc.StandardInput.BaseStream.Write($inBytes, 0, $inBytes.Length)
+    $proc.StandardInput.Close()
+    if (-not $proc.WaitForExit(60000)) {
+        $proc.Kill()
+        return 124
+    }
+    $script:SshCopyStderr = $proc.StandardError.ReadToEnd()
+    return $proc.ExitCode
+}
+
+Write-Host 'copying read-only probe via ssh cat (no SFTP)'
+$copyCode = Copy-ProbeViaSshCat
+if ($copyCode -ne 0) {
+    if ($script:SshCopyStderr) {
+        Write-Host ($script:SshCopyStderr.Trim())
+    }
+    if (-not $idPath -and -not $usePassword) {
         Write-Host 'SSH_KEY_REQUIRED'
-        Write-ProbeNotRun -Reason 'scp failed without IdentityFile/BTKN_SSH_IDENTITY/SSH agent; password SSH is not automated'
+        Write-ProbeNotRun -Reason 'ssh copy failed without IdentityFile/BTKN_SSH_IDENTITY/SSH agent and without BTKN_SSH_PASSWORD'
         exit 0
     }
-    Write-ProbeNotRun -Reason "scp failed (exit $LASTEXITCODE); connection or credentials"
+    Write-ProbeNotRun -Reason "ssh cat copy failed (exit $copyCode); connection or credentials"
     exit 0
 }
 

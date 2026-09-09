@@ -11,7 +11,8 @@ waves:
   engine_vertical_slice: complete
   merge_authorized: false
   next_recommended: ORCHESTRATOR DECISION after KN-1011 evidence (R6 not started)
-  r51_status: in_progress
+  r51_status: probe_run
+  r51_note: read-only KN-1011 probe RUN 2026-09-09; capture engine still UNKNOWN; do not merge main
   R4:
     name: Minimal blacktempled + embedded UI + engine vertical slice
     base_sha: 41099b953e8318d2c6115e04521a2f9821627378
@@ -54,8 +55,8 @@ waves:
     notes: >
       R5 prep integrated. routing planner ready. DNS model ready.
       geodata lifecycle ready. remote lists ready. remote policy ready.
-      QEMU gate ready. capture engine UNKNOWN. hardware probe NOT RUN.
-      live routing NOT IMPLEMENTED. Transparent routing not applied.
+      QEMU gate ready. capture engine UNKNOWN. hardware probe RUN 2026-09-09
+      (see docs/hardware/kn-1011-capabilities.md). live routing NOT IMPLEMENTED.
 
 ownership:
   A_go_runtime:
