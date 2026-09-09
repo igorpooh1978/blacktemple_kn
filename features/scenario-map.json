@@ -136,25 +136,36 @@
     "BTKN-TOOL-012": {
       "priority": "P0",
       "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
         "docs/hardware/probesafety_test.go::TestProbeSingleInstanceAlreadyRunning",
         "docs/hardware/probesafety_test.go::TestProbeLockMkdirSerializes"
       ],
-      "redProof": "HEAD probe without lock directory; TestProbeSingleInstanceAlreadyRunning FAIL; restored before commit"
+      "redProof": "65cbb2f name-only --cleanup-orphans; TestNoNameOnlyOrphanReap FAIL; executable A missing --selftest-hang"
     },
     "BTKN-TOOL-013": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestProbeStaleLockRecovers"],
-      "redProof": "HEAD probe without FOREIGN_OR_UNKNOWN_PROCESS; TestProbeStaleLockRecovers FAIL; restored before commit"
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeStaleLockRecovers"
+      ],
+      "redProof": "65cbb2f name-only orphan reap; TestNoNameOnlyOrphanReap FAIL; executable G/H not guaranteed"
     },
     "BTKN-TOOL-014": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestProbeHardTimeoutKillsOwnedTree"],
-      "redProof": "HEAD probe missing TIMEOUT tree kill; TestProbeHardTimeoutKillsOwnedTree FAIL; restored before commit"
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeHardTimeoutKillsOwnedTree"
+      ],
+      "redProof": "65cbb2f watchdog is inside owned tree; executable B missing supervisor TIMEOUT"
     },
     "BTKN-TOOL-015": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestProbeFailureLeavesNoStorm"],
-      "redProof": "HEAD probe missing ALREADY_RUNNING/TIMEOUT/TERM+KILL markers; TestProbeFailureLeavesNoStorm FAIL; restored before commit"
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestNoNameOnlyOrphanReap",
+        "docs/hardware/probesafety_test.go::TestProbeFailureLeavesNoStorm"
+      ],
+      "redProof": "65cbb2f btkn_reap_other_probe_scripts name-only kill; TestNoNameOnlyOrphanReap FAIL"
     },
     "BTKN-TOOL-016": {
       "priority": "P0",
@@ -162,7 +173,11 @@
     },
     "BTKN-TOOL-017": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestProbeNeverKillallOrForeign"]
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeNeverKillallOrForeign"
+      ],
+      "redProof": "65cbb2f name-only reap; executable D/F required beyond fakeProc graph"
     }
   }
 }

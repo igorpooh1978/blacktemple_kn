@@ -4,12 +4,14 @@
 # Resource-safe diagnostic: single instance, hard timeout, owned-tree cleanup.
 # Does not mutate routing, firewall, sysctl, packages, or foreign processes.
 
-BTKN_PROBE_LOCKDIR="/tmp/btkn-router-probe.lock"
+BTKN_PROBE_LOCKDIR="${BTKN_PROBE_LOCKDIR:-/tmp/btkn-router-probe.lock}"
 BTKN_PROBE_MAX_SEC="${BTKN_PROBE_MAX_SEC:-180}"
 BTKN_PROBE_GRACE_SEC="${BTKN_PROBE_GRACE_SEC:-2}"
 BTKN_PROBE_CMD_SEC="${BTKN_PROBE_CMD_SEC:-10}"
 BTKN_PROBE_MAX_BYTES=262144
 BTKN_WATCHDOG_PID=""
+BTKN_SUPERVISOR_RUN_ID=""
+BTKN_WORKER_PID=""
 
 btkn_ppid() {
 	sed -n 's/^PPid:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null
@@ -27,7 +29,8 @@ btkn_has_run_id() {
 	_pid=$1
 	_id=$2
 	[ -n "$_id" ] || return 1
-	tr '\0' '\n' < "/proc/${_pid}/environ" 2>/dev/null | grep -q "^BTKN_PROBE_RUN_ID=${_id}$"
+		[ -r "/proc/${_pid}/environ" ] || return 1
+	cat "/proc/${_pid}/environ" 2>/dev/null | tr '\0' '\n' | grep -q "^BTKN_PROBE_RUN_ID=${_id}$"
 }
 
 btkn_forbidden_cmd() {
@@ -43,14 +46,14 @@ btkn_root_ok() {
 	_id=$2
 	[ -d "/proc/${_pid}" ] || return 1
 	_cmd=$(btkn_cmdline "$_pid")
-	echo "$_cmd" | grep -q 'btkn-router-probe.sh' || return 1
+	echo "$_cmd" | grep -q 'router-probe.sh' || return 1
 	btkn_has_run_id "$_pid" "$_id" || return 1
 	btkn_forbidden_cmd "$_cmd" && return 1
 	return 0
 }
 
 btkn_is_probe_script() {
-	echo "$1" | grep -q 'btkn-router-probe.sh'
+	echo "$1" | grep -q 'router-probe.sh'
 }
 
 btkn_collect_descendants() {
@@ -122,60 +125,16 @@ btkn_kill_owned_tree() {
 	btkn_term_kill_tree "$_root"
 }
 
-btkn_kill_script_tree() {
-	_root=$1
-	[ -n "$_root" ] || return 0
-	[ "$_root" = "$$" ] && return 0
-	[ "$_root" = "1" ] && return 0
-	_cmd=$(btkn_cmdline "$_root")
-	btkn_is_probe_script "$_cmd" || return 0
-	btkn_forbidden_cmd "$_cmd" && return 0
-	btkn_term_kill_tree "$_root"
-}
-
-btkn_reap_other_probe_scripts() {
-	_self=$$
-	_roots=""
-	for _d in /proc/[0-9]*; do
-		_p=${_d#/proc/}
-		[ "$_p" = "$_self" ] && continue
-		_cmd=$(btkn_cmdline "$_p") || continue
-		btkn_is_probe_script "$_cmd" || continue
-		btkn_forbidden_cmd "$_cmd" && continue
-		_pp=$(btkn_ppid "$_p")
-		_walk=$_pp
-		_skip=0
-		while [ -n "$_walk" ] && [ "$_walk" != "0" ] && [ "$_walk" != "1" ]; do
-			if [ "$_walk" = "$_self" ]; then
-				_skip=1
-				break
-			fi
-			_walk=$(btkn_ppid "$_walk")
-		done
-		[ "$_skip" -eq 1 ] && continue
-		_roots="${_roots} ${_p}"
-	done
-	[ -n "$_roots" ] || return 0
-	_all=""
-	for _r in $_roots; do
-		_all="${_all} $(btkn_collect_descendants "$_r")"
-	done
-	_rev=""
-	for _p in $_all; do
-		_rev="${_p} ${_rev}"
-	done
-	for _p in $_rev; do
-		[ "$_p" = "$_self" ] && continue
-		[ "$_p" = "1" ] && continue
-		kill -TERM "$_p" 2>/dev/null || true
-	done
-	sleep "$BTKN_PROBE_GRACE_SEC"
-	for _p in $_rev; do
-		[ "$_p" = "$_self" ] && continue
-		[ "$_p" = "1" ] && continue
-		[ -d "/proc/${_p}" ] || continue
-		kill -KILL "$_p" 2>/dev/null || true
-	done
+btkn_write_lock_meta() {
+	_pid=$1
+	{
+		echo "run_id=${BTKN_SUPERVISOR_RUN_ID}"
+		echo "pid=${_pid}"
+		echo "script=$0"
+		echo "started=$(date +%s)"
+		echo "cmdline=$(btkn_cmdline "$_pid")"
+	} > "$BTKN_PROBE_LOCKDIR/meta"
+	echo "$_pid" > "$BTKN_PROBE_LOCKDIR/pid"
 }
 
 btkn_release_lock() {
@@ -200,15 +159,24 @@ btkn_stop_watchdog() {
 
 btkn_timeout_kill() {
 	echo "TIMEOUT"
-	btkn_kill_owned_tree "$$"
+	if [ -n "$BTKN_WORKER_PID" ] && [ -n "$BTKN_SUPERVISOR_RUN_ID" ]; then
+		if btkn_root_ok "$BTKN_WORKER_PID" "$BTKN_SUPERVISOR_RUN_ID"; then
+			btkn_term_kill_tree "$BTKN_WORKER_PID"
+		fi
+		btkn_reap_run_id "$BTKN_SUPERVISOR_RUN_ID"
+	fi
 	btkn_release_lock
 }
 
 btkn_on_signal() {
 	_st=$?
 	trap '' EXIT INT TERM HUP
-	btkn_stop_watchdog
-	btkn_kill_owned_tree "$$"
+	if [ -n "$BTKN_WORKER_PID" ] && [ -n "$BTKN_SUPERVISOR_RUN_ID" ]; then
+		if btkn_root_ok "$BTKN_WORKER_PID" "$BTKN_SUPERVISOR_RUN_ID"; then
+			btkn_term_kill_tree "$BTKN_WORKER_PID"
+		fi
+		btkn_reap_run_id "$BTKN_SUPERVISOR_RUN_ID"
+	fi
 	btkn_release_lock
 	exit $_st
 }
@@ -219,6 +187,7 @@ btkn_reap_run_id() {
 	_list=""
 	for _d in /proc/[0-9]*; do
 		_p=${_d#/proc/}
+		[ "$_p" = "$$" ] && continue
 		btkn_has_run_id "$_p" "$_id" || continue
 		_cmd=$(btkn_cmdline "$_p")
 		btkn_forbidden_cmd "$_cmd" && continue
@@ -231,11 +200,13 @@ btkn_reap_run_id() {
 	done
 	for _p in $_rev; do
 		[ "$_p" = "1" ] && continue
+		[ "$_p" = "$$" ] && continue
 		kill -TERM "$_p" 2>/dev/null || true
 	done
 	sleep "$BTKN_PROBE_GRACE_SEC"
 	for _p in $_rev; do
 		[ "$_p" = "1" ] && continue
+		[ "$_p" = "$$" ] && continue
 		[ -d "/proc/${_p}" ] || continue
 		btkn_has_run_id "$_p" "$_id" || continue
 		_cmd=$(btkn_cmdline "$_p")
@@ -248,6 +219,7 @@ btkn_run_id_left() {
 	_id=$1
 	for _d in /proc/[0-9]*; do
 		_p=${_d#/proc/}
+		[ "$_p" = "$$" ] && continue
 		btkn_has_run_id "$_p" "$_id" || continue
 		_cmd=$(btkn_cmdline "$_p")
 		btkn_forbidden_cmd "$_cmd" && continue
@@ -275,7 +247,8 @@ btkn_acquire() {
 	if [ -z "$BTKN_PROBE_RUN_ID" ]; then
 		BTKN_PROBE_RUN_ID="${$}-$(date +%s)"
 	fi
-	export BTKN_PROBE_RUN_ID
+	BTKN_SUPERVISOR_RUN_ID=$BTKN_PROBE_RUN_ID
+	unset BTKN_PROBE_RUN_ID
 	if mkdir "$BTKN_PROBE_LOCKDIR" 2>/dev/null; then
 		:
 	else
@@ -310,31 +283,47 @@ btkn_acquire() {
 			exit 0
 		fi
 	fi
-	{
-		echo "run_id=${BTKN_PROBE_RUN_ID}"
-		echo "pid=$$"
-		echo "script=$0"
-		echo "started=$(date +%s)"
-		echo "cmdline=$(btkn_cmdline $$)"
-	} > "$BTKN_PROBE_LOCKDIR/meta"
-	echo "$$" > "$BTKN_PROBE_LOCKDIR/pid"
+}
+
+btkn_supervisor_run() {
+	btkn_acquire
+	_id=$BTKN_SUPERVISOR_RUN_ID
 	trap 'btkn_on_signal' EXIT INT TERM HUP
-	(
-		sleep "$BTKN_PROBE_MAX_SEC"
-		echo "TIMEOUT"
-		# Re-read pid from lock; only kill if identity still matches.
-		if [ -r "$BTKN_PROBE_LOCKDIR/meta" ]; then
-			_tpid=$(sed -n 's/^pid=//p' "$BTKN_PROBE_LOCKDIR/meta" | head -n 1)
-			_tid=$(sed -n 's/^run_id=//p' "$BTKN_PROBE_LOCKDIR/meta" | head -n 1)
-			if [ "$_tid" = "$BTKN_PROBE_RUN_ID" ] && btkn_root_ok "$_tpid" "$_tid"; then
-				BTKN_PROBE_RUN_ID=$_tid
-				export BTKN_PROBE_RUN_ID
-				btkn_kill_owned_tree "$_tpid"
-				btkn_release_lock
-			fi
+	BTKN_PROBE_WORKER=1 BTKN_PROBE_RUN_ID="$_id" BTKN_PROBE_LOCKDIR="$BTKN_PROBE_LOCKDIR" \
+		BTKN_PROBE_MAX_SEC="$BTKN_PROBE_MAX_SEC" BTKN_PROBE_GRACE_SEC="$BTKN_PROBE_GRACE_SEC" \
+		BTKN_PROBE_CMD_SEC="$BTKN_PROBE_CMD_SEC" BTKN_PROBE_SELFTEST="${BTKN_PROBE_SELFTEST:-}" \
+		sh "$0" "$@" &
+	BTKN_WORKER_PID=$!
+	btkn_write_lock_meta "$BTKN_WORKER_PID"
+	_n=0
+	while [ "$_n" -lt "$BTKN_PROBE_MAX_SEC" ]; do
+		if [ ! -d "/proc/${BTKN_WORKER_PID}" ]; then
+			wait "$BTKN_WORKER_PID"
+			_st=$?
+			trap '' EXIT INT TERM HUP
+			btkn_release_lock
+			exit $_st
 		fi
-	) &
-	BTKN_WATCHDOG_PID=$!
+		sleep 1
+		_n=$((_n + 1))
+	done
+	echo "TIMEOUT"
+	if btkn_root_ok "$BTKN_WORKER_PID" "$_id"; then
+		btkn_term_kill_tree "$BTKN_WORKER_PID"
+	fi
+	btkn_reap_run_id "$_id"
+	_left=0
+	if btkn_run_id_left "$_id"; then
+		_left=1
+	fi
+	trap '' EXIT INT TERM HUP
+	btkn_release_lock
+	wait "$BTKN_WORKER_PID" 2>/dev/null || true
+	if [ "$_left" -eq 1 ]; then
+		echo "TIMEOUT_CLEANUP_FAILED"
+		exit 1
+	fi
+	exit 1
 }
 
 btkn_finish() {
@@ -387,28 +376,28 @@ btkn_cmd_cleanup() {
 }
 
 btkn_cmd_cleanup_orphans() {
-	btkn_reap_other_probe_scripts
-	_left=0
-	for _d in /proc/[0-9]*; do
-		_p=${_d#/proc/}
-		[ "$_p" = "$$" ] && continue
-		_cmd=$(btkn_cmdline "$_p")
-		btkn_is_probe_script "$_cmd" || continue
-		btkn_forbidden_cmd "$_cmd" && continue
-		_pp=$(btkn_ppid "$_p")
-		_walk=$_pp
-		_skip=0
-		while [ -n "$_walk" ] && [ "$_walk" != "0" ] && [ "$_walk" != "1" ]; do
-			if [ "$_walk" = "$$" ]; then
-				_skip=1
-				break
-			fi
-			_walk=$(btkn_ppid "$_walk")
-		done
-		[ "$_skip" -eq 1 ] && continue
-		_left=1
-	done
-	if [ "$_left" -eq 1 ]; then
+	if [ ! -d "$BTKN_PROBE_LOCKDIR" ]; then
+		echo "REMOTE_PROCESS_NOT_FOUND"
+		return 1
+	fi
+	btkn_lock_live_identity
+	_lk=$?
+	if [ "$_lk" -eq 0 ]; then
+		echo "ALREADY_RUNNING"
+		return 0
+	fi
+	if [ "$_lk" -eq 2 ]; then
+		echo "FOREIGN_OR_UNKNOWN_PROCESS"
+		return 1
+	fi
+	_oldid=$(sed -n 's/^run_id=//p' "$BTKN_PROBE_LOCKDIR/meta" 2>/dev/null | head -n 1)
+	if [ -z "$_oldid" ]; then
+		echo "FOREIGN_OR_UNKNOWN_PROCESS"
+		return 1
+	fi
+	btkn_reap_run_id "$_oldid"
+	btkn_release_lock
+	if btkn_run_id_left "$_oldid"; then
 		echo "TIMEOUT_CLEANUP_FAILED"
 		return 1
 	fi
@@ -550,31 +539,38 @@ try_net() {
 		echo "NOT AVAILABLE: ${_bin}"
 		return 0
 	fi
-	"$@" 2>&1 | redact &
-	_pipe=$!
+	(
+		"$@" 2>&1 | redact
+	) &
+	_sup=$!
 	_n=0
 	while [ "$_n" -lt "$BTKN_PROBE_CMD_SEC" ]; do
-		if [ ! -d "/proc/${_pipe}" ]; then
-			wait "$_pipe" 2>/dev/null || true
+		if [ ! -d "/proc/${_sup}" ]; then
+			wait "$_sup" 2>/dev/null || true
 			return 0
 		fi
 		sleep 1
 		_n=$((_n + 1))
 	done
-	_cmd=$(btkn_cmdline "$_pipe")
+	_cmd=$(btkn_cmdline "$_sup")
 	btkn_forbidden_cmd "$_cmd" && return 0
-	_list=$(btkn_collect_descendants "$_pipe")
+	_list=$(btkn_collect_descendants "$_sup")
+	_rev=""
 	for _p in $_list; do
+		_rev="${_p} ${_rev}"
+	done
+	for _p in $_rev; do
 		[ "$_p" = "1" ] && continue
 		kill -TERM "$_p" 2>/dev/null || true
 	done
 	sleep 1
-	for _p in $_list; do
+	for _p in $_rev; do
 		[ "$_p" = "1" ] && continue
 		[ -d "/proc/${_p}" ] || continue
 		kill -KILL "$_p" 2>/dev/null || true
 	done
-	wait "$_pipe" 2>/dev/null || true
+	wait "$_sup" 2>/dev/null || true
+	echo "TIMEOUT"
 	echo "BOUNDED: ${_label}"
 	return 0
 }
@@ -668,17 +664,51 @@ excerpt_topic_lines() {
 	grep -n -E -i 'iptables|ipset|TPROXY|REDIRECT|MARK|CONNMARK|fwmark|[[:space:]]ip[[:space:]]+rule|[[:space:]]ip[[:space:]]+route|DNS|[[:space:]]53([^0-9]|$)|policy|routing-mark|proxy[[:space:]]*mode' "$_file" 2>/dev/null | head -n 20 | redact || echo "(no matching topic lines)"
 }
 
-if [ "$1" = "--cleanup-run-id" ]; then
+if [ "${1:-}" = "--cleanup-run-id" ]; then
 	btkn_cmd_cleanup "$2"
 	exit $?
 fi
-if [ "$1" = "--cleanup-orphans" ]; then
+if [ "${1:-}" = "--cleanup-orphans" ]; then
 	btkn_cmd_cleanup_orphans
 	exit $?
 fi
+if [ "${1:-}" = "--selftest-pipeline" ]; then
+	BTKN_PROBE_RUN_ID=${BTKN_PROBE_RUN_ID:-pipe-$$}
+	export BTKN_PROBE_RUN_ID
+	_self=$$
+	BTKN_PROBE_CMD_SEC=${BTKN_PROBE_CMD_SEC:-1}
+	try_net "selftest-hang-upstream" sleep 120
+	_left=0
+	for _d in /proc/[0-9]*; do
+		_p=${_d#/proc/}
+		[ "$_p" = "$_self" ] && continue
+		btkn_has_run_id "$_p" "$BTKN_PROBE_RUN_ID" || continue
+		_cmd=$(btkn_cmdline "$_p")
+		btkn_forbidden_cmd "$_cmd" && continue
+		_left=1
+	done
+	if [ "$_left" -eq 1 ]; then
+		echo "PIPELINE_ORPHAN"
+		exit 1
+	fi
+	echo "PIPELINE_CLEAN"
+	exit 0
+fi
+if [ "${1:-}" = "--selftest-hang" ]; then
+	BTKN_PROBE_SELFTEST=hang
+	export BTKN_PROBE_SELFTEST
+	shift
+fi
+if [ -z "${BTKN_PROBE_WORKER:-}" ]; then
+	btkn_supervisor_run "$@"
+	exit $?
+fi
+if [ "${BTKN_PROBE_SELFTEST:-}" = "hang" ]; then
+	echo "SELFTEST_HANG pid=$$ run_id=${BTKN_PROBE_RUN_ID}"
+	sleep 9999
+	exit 0
+fi
 
-btkn_acquire
-btkn_reap_other_probe_scripts
 echo "blacktemple-kn router-probe"
 echo "run_id=${BTKN_PROBE_RUN_ID}"
 echo "lock=${BTKN_PROBE_LOCKDIR}"

@@ -532,7 +532,7 @@ $traceDir = Join-Path $PSScriptRoot '.research-local\hardware'
 New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
 $rawPath = Join-Path $traceDir "kn1011-probe-$stamp.txt"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-$snapCmd = 'echo BEFORE; cat /proc/uptime 2>/dev/null; cat /proc/loadavg 2>/dev/null; echo ---btkn-procs---; ps w 2>/dev/null | grep btkn-router-probe || echo none; echo ---owned-env---; n=0; for e in /proc/[0-9]*/environ; do grep -q BTKN_PROBE_RUN_ID "$e" 2>/dev/null || continue; n=$((n+1)); done; echo owned_count=$n; echo ---lock---; if [ -d /tmp/btkn-router-probe.lock ]; then echo present; cat /tmp/btkn-router-probe.lock/meta 2>/dev/null; else echo absent; fi'
+$snapCmd = 'echo BEFORE; cat /proc/uptime 2>/dev/null; cat /proc/loadavg 2>/dev/null; echo ---btkn-procs---; ps w 2>/dev/null | grep btkn-router-probe || echo none; echo ---owned-env---; n=0; for e in /proc/[0-9]*/environ; do grep -q BTKN_PROBE_RUN_ID "$e" 2>/dev/null || continue; n=$((n+1)); done; echo owned_count=$n; echo ---xray---; ps w 2>/dev/null | grep "[x]ray run" || echo none; echo ---xkeen-ui---; ps w 2>/dev/null | grep "[x]keen-ui" || echo none; echo ---lock---; if [ -d /tmp/btkn-router-probe.lock ]; then echo present; cat /tmp/btkn-router-probe.lock/meta 2>/dev/null; else echo absent; fi'
 Write-Host '--- host snapshot BEFORE probe ---'
 $before = Invoke-SshCapture -RemoteCommand $snapCmd -TimeoutMs 20000
 foreach ($line in @($before.Lines)) { Write-Host $line }
@@ -549,6 +549,10 @@ if ($run.TimedOut -or $run.ExitCode -eq 124) {
     Write-Host 'local SSH probe TIMEOUT; terminating ssh tree and cleaning remote owned probe'
     $cleanSt = Invoke-RemoteProbeCleanup -RunId $probeRunId
     Write-Host "remote cleanup: $cleanSt"
+    Write-Host '--- host snapshot AFTER probe ---'
+    $afterSnap = $snapCmd.Replace('BEFORE', 'AFTER')
+    $after = Invoke-SshCapture -RemoteCommand $afterSnap -TimeoutMs 20000
+    foreach ($line in @($after.Lines)) { Write-Host $line }
     Write-ProbeNotRun -Reason "ssh probe TIMEOUT ($cleanSt)"
     Write-Host "RAW TRACE: $rawPath"
     exit 0
@@ -560,6 +564,10 @@ if ($run.ExitCode -ne 0) {
         $cleanSt = Invoke-RemoteProbeCleanup -RunId $probeRunId
         Write-Host "remote cleanup after non-zero exit: $cleanSt"
     }
+    Write-Host '--- host snapshot AFTER probe ---'
+    $afterSnap = $snapCmd.Replace('BEFORE', 'AFTER')
+    $after = Invoke-SshCapture -RemoteCommand $afterSnap -TimeoutMs 20000
+    foreach ($line in @($after.Lines)) { Write-Host $line }
     Write-ProbeNotRun -Reason "ssh probe failed (exit $($run.ExitCode)); connection or remote shell"
     Write-Host "RAW TRACE: $rawPath"
     exit 0

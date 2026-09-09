@@ -20,6 +20,7 @@ Feature: Hardware tooling
     When a second probe starts
     Then it exits immediately with ALREADY_RUNNING
     And no second diagnostic workload starts
+    And this is proven by executable shell acceptance on Linux /proc
 
   @BTKN-TOOL-013 @P0 @failure
   Scenario: A stale probe lock does not permanently block diagnostics
@@ -60,3 +61,5 @@ Feature: Hardware tooling
     Given cleanup of an owned probe tree
     Then xray xkeen ndnproxy nginx are never kill targets
     And killall awk or pkill sh is forbidden
+    And a foreign process whose cmdline only resembles the probe script survives
+    And this is proven by executable shell acceptance on Linux /proc

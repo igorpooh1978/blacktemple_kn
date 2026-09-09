@@ -11,7 +11,7 @@ Behavior → Gherkin → executable acceptance → RED → production code → G
 
 Временные RED-мутации не коммитятся. Если RED нельзя доказать безопасно: `RED_PROOF_NOT_AVAILABLE` в `scenario-map.json`.
 
-## Current map (R6-H.1)
+## Current map (R6-H.1 FIX-2)
 
 Counts from `go run ./tools/gherkincheck`:
 
@@ -24,15 +24,13 @@ features=12
 mapped=36
 ```
 
-RED proofs this iteration (temporary production mutation against HEAD `594245c`, restored, not committed):
+RED proofs this iteration (tests against `65cbb2f`, no temporary production mutation committed):
 
-- `BTKN-ROUT-031` — err-only classifier → FAIL `TestIsAbsentObjectFailureRealisticExitError` → restore GREEN
-- `BTKN-KEEN-003` — prefix-only `HasPrefix(root)` → FAIL `TestValidateModulePath` on `/lib/modules-evil` → restore GREEN
-- `BTKN-TOOL-011` — `BeginWrite` without `EndWrite` → FAIL `TestCopyScriptViaSshCatClosesStdin` → restore GREEN
-- `BTKN-TOOL-012` — no lock directory → FAIL `TestProbeSingleInstanceAlreadyRunning` → restore GREEN
-- `BTKN-TOOL-013` — no `FOREIGN_OR_UNKNOWN_PROCESS` → FAIL `TestProbeStaleLockRecovers` → restore GREEN
-- `BTKN-TOOL-014` — no remote `TIMEOUT` / tree kill → FAIL `TestProbeHardTimeoutKillsOwnedTree` → restore GREEN
-- `BTKN-TOOL-015` — HEAD storm guard missing `ALREADY_RUNNING`/`TIMEOUT`/TERM+KILL → FAIL `TestProbeFailureLeavesNoStorm` → restore GREEN
+- `BTKN-TOOL-015` / name-only reap — `TestNoNameOnlyOrphanReap` FAIL on `btkn_reap_other_probe_scripts`
+- executable D — `--cleanup-orphans` killed a foreign `btkn-router-probe.sh` cmdline decoy (`FAIL: D foreign similar-cmdline was killed`)
+- executable A/G hung or printed `FOREIGN_OR_UNKNOWN_PROCESS` until supervisor/worker + `router-probe.sh` identity
+
+GREEN: `docs/hardware/probe_safety_exec.sh` via `TestProbeExecutableProcessSafety` (Linux /proc). Windows skips the exec test; static `TestNoNameOnlyOrphanReap` still runs.
 
 New TOOL scenarios this iteration:
 

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -178,6 +179,51 @@ func TestRedactPolicyFixtures(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("redact %q: got %q want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestNoNameOnlyOrphanReap(t *testing.T) {
+	s := readProbeScript(t)
+	if strings.Contains(s, "btkn_reap_other_probe_scripts") {
+		t.Fatal("name-only btkn_reap_other_probe_scripts is forbidden")
+	}
+	if strings.Contains(s, "btkn_kill_script_tree") {
+		t.Fatal("name-only btkn_kill_script_tree is forbidden")
+	}
+	idx := strings.Index(s, "btkn_cmd_cleanup_orphans")
+	if idx < 0 {
+		t.Fatal("missing btkn_cmd_cleanup_orphans")
+	}
+	end := idx + 800
+	if end > len(s) {
+		end = len(s)
+	}
+	body := s[idx:end]
+	if strings.Contains(body, "btkn_is_probe_script") {
+		t.Fatal("--cleanup-orphans must not TERM/KILL by cmdline name")
+	}
+	if !strings.Contains(s, "FOREIGN_OR_UNKNOWN_PROCESS") {
+		t.Fatal("unproven ownership must print FOREIGN_OR_UNKNOWN_PROCESS")
+	}
+}
+
+func TestProbeExecutableProcessSafety(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("executable probe process-safety requires Linux /proc")
+	}
+	probe := locateProbeScript(t)
+	script := locateRepoFile(t, "docs", "hardware", "probe_safety_exec.sh")
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", script, probe)
+	cmd.Dir = repoRoot(t)
+	out, err := cmd.CombinedOutput()
+	t.Logf("%s", out)
+	if err != nil {
+		t.Fatalf("executable process-safety: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "RESULT: PASS") {
+		t.Fatalf("missing RESULT: PASS\n%s", out)
 	}
 }
 
