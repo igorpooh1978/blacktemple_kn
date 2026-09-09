@@ -1,0 +1,66 @@
+wave: R6
+task: service-keenetic
+agent: F
+branch: agent/r6/service-keenetic
+worktree: blacktemple_kn-wt/r6-service-keenetic
+base_sha: 90379f924d1bca60366423217701ff8e590b502e
+merge_authorized: false
+
+goal: >
+  Keenetic/Entware packaging and platform adapters for hybrid-iptables
+  coexistence. Own packaging/keenetic/** plus existing init/platform.
+  Production daemon never stops XKeen.
+
+allowed_paths:
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - packaging/init/
+  - packaging/keenetic/
+
+forbidden_paths:
+  - packaging/control/
+  - packaging/AGENTS.md
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - tools/
+  - build.ps1
+  - bootstrap.ps1
+  - test.ps1
+  - package.ps1
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - src/internal/routing/
+  - router-smoke.ps1
+  - scripts/
+  - docs/hardware/
+  - third_party/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-004 restarts; ADR-011 hybrid-iptables and XKeen coexistence
+  - other_r6_agents: none (D owns Apply refusal; F does not live-Apply)
+  - r6_i: not started
+
+acceptance_criteria:
+  - packaging/keenetic/** holds Keenetic ndm/netfilter templates for BTKN_ only. Uninstall removes only BTKN_ rules and /opt/blacktemple-kn.
+  - Do not touch /opt/bin/xray, /opt/sbin/xray, XKeen init, or XKeen chains. Production supervisor never stops XKeen.
+  - Memory AUTO leaves Keenetic swappiness=60. No sysctl -w vm.swappiness. GOMEMLIMIT is not a default.
+  - packaging/init/S99blacktemple-kn remains Entware rc.func/init.d. Distinguish restart-vpn vs restart-manager vs full-restart (ADR-004).
+  - platform/entware and platform/keenetic adapters only; no systemd. fail-open remains default.
+  - CGO_ENABLED=0. No new go.mod dependencies. Tests without a live router.
+  - Do not edit packaging/control/** (H). Do not merge main. Push only agent/r6/service-keenetic. R6-I is not started by this agent.
+
+do_not:
+  - iptables -F or non-BTKN_ chains
+  - stop or modify XKeen from the production daemon
+  - own IPK control/postinst (H)
+  - live Apply capture on KN-1011
+  - change global swappiness
+  - add Go modules
+  - merge any branch

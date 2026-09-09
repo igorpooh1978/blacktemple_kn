@@ -4,15 +4,16 @@ default_branch: main
 orchestration: chatgpt-main-dialog
 
 waves:
-  current: R5
+  current: R6
   frozen_contracts: true
   r4_status: integrated
   r5_status: integrated
+  r6_status: in_progress
   engine_vertical_slice: complete
   merge_authorized: false
-  next_recommended: ORCHESTRATOR DECISION after KN-1011 evidence (R6 not started)
+  next_recommended: ORCHESTRATOR REVIEW
   r51_status: probe_run
-  r51_note: read-only KN-1011 probe RUN 2026-09-09; capture engine still UNKNOWN; do not merge main
+  r51_note: read-only KN-1011 probe RUN 2026-09-09; R6 selected hybrid-iptables from that evidence; live smoke NOT RUN
   R4:
     name: Minimal blacktempled + embedded UI + engine vertical slice
     base_sha: 41099b953e8318d2c6115e04521a2f9821627378
@@ -55,8 +56,34 @@ waves:
     notes: >
       R5 prep integrated. routing planner ready. DNS model ready.
       geodata lifecycle ready. remote lists ready. remote policy ready.
-      QEMU gate ready. capture engine UNKNOWN. hardware probe RUN 2026-09-09
+      QEMU gate ready. hardware probe RUN 2026-09-09
       (see docs/hardware/kn-1011-capabilities.md). live routing NOT IMPLEMENTED.
+  R6:
+    name: hybrid-iptables capture orchestration (no live Apply)
+    base_sha: 90379f924d1bca60366423217701ff8e590b502e
+    merge_authorized: false
+    integrated: false
+    parallel: true
+    agents: [O, C, D, F, M]
+    not_in_wave: [A, B, E, G, H, I, J, K, L]
+    branches:
+      O: agent/r6/orchestration
+      C: agent/r6/xray-engine
+      D: agent/r6/routing-capture
+      F: agent/r6/service-keenetic
+      M: agent/r6/kn1011-harness
+    worktrees:
+      O: blacktemple_kn-wt/r6-orchestration
+      C: blacktemple_kn-wt/r6-xray-engine
+      D: blacktemple_kn-wt/r6-routing-capture
+      F: blacktemple_kn-wt/r6-service-keenetic
+      M: blacktemple_kn-wt/r6-kn1011-harness
+    notes: >
+      hybrid-iptables selected by KN-1011 hardware evidence (ADR-011).
+      IPv4 TCP=REDIRECT UDP=TPROXY backend=iptables/xtables. TUN fallback not primary.
+      nft not available. Mihomo not used. DNS first smoke KEENETIC_DIRECT.
+      live smoke NOT RUN. blackTempleHardwareSmoke NOT RUN. Do not write SUPPORTED.
+      R6-I live Apply is not started. next_recommended is ORCHESTRATOR REVIEW.
 
 ownership:
   A_go_runtime:
@@ -70,14 +97,16 @@ ownership:
   E_lists:
     paths: [src/internal/remotelists/, src/internal/remotepolicy/]
   F_service:
-    paths: [src/internal/supervisor/, src/internal/platform/, packaging/init/]
-    notes: F owns packaging/init/** only inside packaging/. H owns the rest of packaging/.
+    paths: [src/internal/supervisor/, src/internal/platform/, packaging/init/, packaging/keenetic/]
+    notes: >
+      F owns packaging/init/** and packaging/keenetic/** inside packaging/.
+      H owns the rest of packaging/. Do not edit packaging/control/**.
   G_web:
     paths: [web/]
   H_build:
     paths: [build.ps1, bootstrap.ps1, test.ps1, package.ps1, tools/, packaging/]
-    except: [packaging/init/]
-    notes: H owns packaging/** except packaging/init/** (F). Do not edit S99blacktemple-kn.
+    except: [packaging/init/, packaging/keenetic/]
+    notes: H owns packaging/** except packaging/init/** (F) and packaging/keenetic/** (F). Do not edit S99blacktemple-kn.
   I_integration:
     paths: [src/internal/connection/, src/internal/atomicfile/]
     notes: atomicfile is the shared durable pointer primitive introduced in R5-I.
@@ -90,12 +119,16 @@ ownership:
   L_provider:
     paths: [src/internal/provider/, src/internal/news/, src/internal/support/, src/internal/pairing/]
   M_hardware:
-    paths: [router-smoke.ps1, scripts/router-probe.sh, docs/hardware/]
-    notes: scripts/router-probe.sh is owned exclusively by M. No other agent edits it.
+    paths: [router-smoke.ps1, scripts/router-*.sh, docs/hardware/]
+    notes: >
+      M owns router-smoke.ps1, all scripts/router-*.sh (including router-probe.sh),
+      and docs/hardware/**. No other agent edits those paths. R6-I live Apply is not started by M.
 
 shared_freeze:
   paths: [go.mod, go.sum, contracts/, docs/adr/]
-  notes: go.mod/go.sum are a shared freeze. Agents must not add Go dependencies without an orchestrator contract gap.
+  notes: >
+    go.mod/go.sum are a shared freeze. Agents must not add Go dependencies without an orchestrator contract gap.
+    ADR-001 through ADR-010 must not be edited. ADR-011 is accepted in R6 by agent O only.
 
 rules:
   - agents_must_not_edit_foreign_ownership
@@ -109,3 +142,5 @@ rules:
   - iptables_prefix_BTKN_
   - ui_lan_only_by_default
   - no_go_mod_deps_without_contract_gap
+  - never_use_xkeen_port_1181
+  - production_daemon_never_stops_xkeen
