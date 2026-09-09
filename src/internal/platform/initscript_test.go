@@ -41,4 +41,10 @@ func TestInitScriptFailClosedAndEntware(t *testing.T) {
 	if !strings.Contains(text, "do_start") || !strings.Contains(text, "do_stop") {
 		t.Fatal("fallback start/stop missing")
 	}
+	if !strings.Contains(text, "wait_network_ready") {
+		t.Fatal("start must wait for network-ready conditions")
+	}
+	if strings.Contains(text, "sleep 30") {
+		t.Fatal("must not use a fixed sleep 30 as the only wait")
+	}
 }
