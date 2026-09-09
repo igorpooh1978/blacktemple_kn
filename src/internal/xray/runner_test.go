@@ -221,3 +221,29 @@ func TestValidateMalformedConfigLive(t *testing.T) {
 		t.Fatalf("error leaked uuid: %v", err)
 	}
 }
+
+func TestDetachStdioUsesOSDevNull(t *testing.T) {
+	cmd := exec.Command("true")
+	f, err := attachDetachedStdio(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Cleanup(func() { _ = f.Close() })
+	}
+	out, ok := cmd.Stdout.(*os.File)
+	if !ok {
+		t.Fatalf("detached stdout type %T; parent io.Discard dies with xray-start", cmd.Stdout)
+	}
+	name := strings.ToLower(out.Name())
+	if name != os.DevNull && name != "nul" {
+		t.Fatalf("detached stdout %q want OS devnull", out.Name())
+	}
+	errf, ok := cmd.Stderr.(*os.File)
+	if !ok {
+		t.Fatalf("detached stderr type %T", cmd.Stderr)
+	}
+	if strings.ToLower(errf.Name()) != name && strings.ToLower(errf.Name()) != os.DevNull && strings.ToLower(errf.Name()) != "nul" {
+		t.Fatalf("detached stderr %q", errf.Name())
+	}
+}

@@ -548,6 +548,11 @@
       "tests": ["docs/hardware/probesafety_test.go::TestControlStanzaKeepsArchitecture"],
       "redProof": "RED: TestControlStanzaKeepsArchitecture FAIL while control has a whitespace line that ends the opkg paragraph before Architecture; GREEN after"
     },
+    "BTKN-PKG-006": {
+      "priority": "P0",
+      "tests": ["tools/ipkpack/main_test.go::TestShebangCRLFNormalizedInIpk"],
+      "redProof": "RED: TestShebangCRLFNormalizedInIpk FAIL while shebang CR remains in packed control scripts; GREEN after LF normalize"
+    },
     "BTKN-XRAY-007": {
       "priority": "P0",
       "tests": [
@@ -555,6 +560,11 @@
         "src/internal/routing/hybrid_test.go::TestForeignXrayOwnerCollision"
       ],
       "redProof": "RED: TestForeignXrayIsNeverOurs FAIL before IsOurXrayExecutable; GREEN after"
+    },
+    "BTKN-XRAY-008": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/runner_test.go::TestDetachStdioUsesOSDevNull"],
+      "redProof": "RED: TestDetachStdioUsesOSDevNull FAIL while detached Start binds child stdio to parent io.Discard; GREEN after OS devnull files"
     },
     "BTKN-ROUT-018": {
       "priority": "P0",

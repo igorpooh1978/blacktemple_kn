@@ -153,6 +153,31 @@ func TestFileModesShebangELFAndOverride(t *testing.T) {
 	assertMode(t, ctrlFiles, "./postinst", 0o755)
 }
 
+func TestShebangCRLFNormalizedInIpk(t *testing.T) {
+	root := t.TempDir()
+	control, data := makePkgDirs(t, root, "mipsel-3.4_kn")
+	crlf := []byte("#!/bin/sh\r\nexit 0\r\n")
+	if err := os.WriteFile(filepath.Join(control, "prerm"), crlf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "pkg.ipk")
+	if err := pack(data, control, out, 0); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrlFiles := tarGzMap(t, readOuterIpk(t, raw)["./control.tar.gz"])
+	body := ctrlFiles["./prerm"].body
+	if bytes.Contains(body, []byte{'\r'}) {
+		t.Fatalf("packed shebang still has CR: %q", body[:min(32, len(body))])
+	}
+	if !bytes.HasPrefix(body, []byte("#!/bin/sh\n")) {
+		t.Fatalf("packed shebang=%q", body[:min(16, len(body))])
+	}
+}
+
 func TestChecksumStableSameEpoch(t *testing.T) {
 	root := t.TempDir()
 	control, data := makePkgDirs(t, root, "mipsel-3.4_kn")

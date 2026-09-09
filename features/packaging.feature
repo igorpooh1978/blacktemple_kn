@@ -31,3 +31,8 @@ Feature: Packaging
     Given packaging/control/control
     Then the first Debian control paragraph includes Architecture
     And it has no blank or whitespace-only lines before Architecture
+
+  @BTKN-PKG-006 @P0 @packaging
+  Scenario: Control maintainer scripts are LF-only
+    Given tools/ipkpack
+    Then packed shebang scripts do not contain CR

@@ -73,13 +73,26 @@ func (r *Runner) Start(ctx context.Context, configPath string) error {
 	}
 
 	cmd := exec.Command(r.Executable, "run", "-c", configPath)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	var stdnull *os.File
 	if r.Detach {
+		f, err := attachDetachedStdio(cmd)
+		if err != nil {
+			return fmt.Errorf("xray start: %w", err)
+		}
+		stdnull = f
 		setDetached(cmd)
+	} else {
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
 	}
 	if err := cmd.Start(); err != nil {
+		if stdnull != nil {
+			_ = stdnull.Close()
+		}
 		return fmt.Errorf("xray start: %w", err)
+	}
+	if stdnull != nil {
+		_ = stdnull.Close()
 	}
 	waitCh := make(chan error, 1)
 	go func() {
@@ -166,6 +179,17 @@ func (r *Runner) reap() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.waitErr
+}
+
+func attachDetachedStdio(cmd *exec.Cmd) (*os.File, error) {
+	f, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stdin = f
+	cmd.Stdout = f
+	cmd.Stderr = f
+	return f, nil
 }
 
 func (r *Runner) requireExecutable() error {

@@ -169,6 +169,7 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 			if err != nil {
 				return nil, err
 			}
+			payload = normalizeScriptNewlines(payload)
 		}
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
@@ -203,6 +204,9 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 			hdr.Linkname = filepath.ToSlash(target)
 			hdr.Typeflag = tar.TypeSymlink
 			hdr.Size = 0
+		}
+		if info.Mode().IsRegular() {
+			hdr.Size = int64(len(payload))
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return nil, err
@@ -240,6 +244,17 @@ func validateIpk(path string) error {
 		return fmt.Errorf("missing gzip magic")
 	}
 	return nil
+}
+
+func normalizeScriptNewlines(b []byte) []byte {
+	if len(b) < 2 || b[0] != '#' || b[1] != '!' {
+		return b
+	}
+	if !bytes.Contains(b, []byte{'\r'}) {
+		return b
+	}
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+	return bytes.ReplaceAll(b, []byte("\r"), []byte("\n"))
 }
 
 func unixMode(info fs.FileInfo, payload []byte) int64 {
