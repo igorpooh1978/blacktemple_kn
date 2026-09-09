@@ -2,8 +2,10 @@ package routing
 
 import "net/netip"
 
-// Builtin private/LAN and localhost CIDRs. Order is the source of truth;
-// never derived from map iteration.
+// Builtin private/LAN, localhost, multicast, and broadcast CIDRs.
+// Order is the single source of truth; never derived from map iteration.
+// Capture engines must use BuiltinDirectPrefixes / IPv4DirectPrefixes
+// rather than copying this list.
 var (
 	privateCIDRs = []string{
 		"10.0.0.0/8",
@@ -17,7 +19,47 @@ var (
 		"127.0.0.0/8",
 		"::1/128",
 	}
+	multicastBroadcastCIDRs = []string{
+		"224.0.0.0/4",
+		"255.255.255.255/32",
+		"ff00::/8",
+	}
 )
+
+// BuiltinDirectPrefixes returns destinations that must stay DIRECT
+// (loopback, RFC1918, link-local, multicast, broadcast).
+func BuiltinDirectPrefixes() []netip.Prefix {
+	n := len(privateCIDRs) + len(localhostCIDRs) + len(multicastBroadcastCIDRs)
+	out := make([]netip.Prefix, 0, n)
+	for _, cidr := range privateCIDRs {
+		if p := parsePrefix(cidr); p.IsValid() {
+			out = append(out, p)
+		}
+	}
+	for _, cidr := range localhostCIDRs {
+		if p := parsePrefix(cidr); p.IsValid() {
+			out = append(out, p)
+		}
+	}
+	for _, cidr := range multicastBroadcastCIDRs {
+		if p := parsePrefix(cidr); p.IsValid() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// IPv4DirectPrefixes returns the IPv4 subset of BuiltinDirectPrefixes.
+func IPv4DirectPrefixes() []netip.Prefix {
+	all := BuiltinDirectPrefixes()
+	out := make([]netip.Prefix, 0, len(all))
+	for _, p := range all {
+		if p.Addr().Is4() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 func parsePrefix(s string) netip.Prefix {
 	p, err := netip.ParsePrefix(s)
@@ -28,7 +70,7 @@ func parsePrefix(s string) netip.Prefix {
 }
 
 func builtinRules() []Rule {
-	out := make([]Rule, 0, len(privateCIDRs)+len(localhostCIDRs)+1)
+	out := make([]Rule, 0, len(privateCIDRs)+len(localhostCIDRs)+len(multicastBroadcastCIDRs)+1)
 	for i, cidr := range privateCIDRs {
 		pfx := parsePrefix(cidr)
 		if !pfx.IsValid() {
@@ -50,6 +92,24 @@ func builtinRules() []Rule {
 		}
 		out = append(out, Rule{
 			ID:       builtinID("localhost", i, pfx.String()),
+			Source:   SourceBuiltin,
+			Priority: PriorityBuiltinSmart,
+			Action:   ActionDirect,
+			Match:    Match{Kind: MatchCIDR, Value: pfx.String(), Prefix: pfx},
+			Enabled:  true,
+		})
+	}
+	for i, cidr := range multicastBroadcastCIDRs {
+		pfx := parsePrefix(cidr)
+		if !pfx.IsValid() {
+			continue
+		}
+		group := "multicast"
+		if pfx.Addr().Is4() && pfx.Addr().As4() == [4]byte{255, 255, 255, 255} {
+			group = "broadcast"
+		}
+		out = append(out, Rule{
+			ID:       builtinID(group, i, pfx.String()),
 			Source:   SourceBuiltin,
 			Priority: PriorityBuiltinSmart,
 			Action:   ActionDirect,
