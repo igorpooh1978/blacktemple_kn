@@ -538,6 +538,11 @@
       "tests": ["docs/hardware/probesafety_test.go::TestBuildStagesNDMHook"],
       "redProof": "RED: TestBuildStagesNDMHook FAIL before build.ps1 copies the hook; GREEN after"
     },
+    "BTKN-PKG-004": {
+      "priority": "P0",
+      "tests": ["tools/ipkpack/main_test.go::TestEntwareIpkIsGzipTar"],
+      "redProof": "RED: TestEntwareIpkIsGzipTar FAIL while ipkpack emits raw ar; GREEN after gzip-ustar outer matching Entware opkg"
+    },
     "BTKN-XRAY-007": {
       "priority": "P0",
       "tests": [

@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -67,12 +66,46 @@ func packWith(dataDir, controlDir, out string, epoch int64, chmod map[string]int
 		return fmt.Errorf("data: %w", err)
 	}
 	debian := []byte("2.0\n")
-	var buf bytes.Buffer
-	if err := writeAr(&buf, []arMember{
-		{name: "debian-binary", data: debian, mt: mt},
-		{name: "control.tar.gz", data: controlGZ, mt: mt},
-		{name: "data.tar.gz", data: dataGZ, mt: mt},
-	}); err != nil {
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	for _, m := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "./debian-binary", data: debian},
+		{name: "./data.tar.gz", data: dataGZ},
+		{name: "./control.tar.gz", data: controlGZ},
+	} {
+		hdr := &tar.Header{
+			Name:    m.name,
+			Mode:    0o644,
+			Size:    int64(len(m.data)),
+			ModTime: mt,
+			Uid:     0,
+			Gid:     0,
+			Uname:   "root",
+			Gname:   "root",
+			Format:  tar.FormatUSTAR,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := tw.Write(m.data); err != nil {
+			return err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	var gzBuf bytes.Buffer
+	zw := gzip.NewWriter(&gzBuf)
+	zw.Name = ""
+	zw.ModTime = mt
+	zw.OS = 3
+	if _, err := zw.Write(tarBuf.Bytes()); err != nil {
+		return err
+	}
+	if err := zw.Close(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil && !os.IsExist(err) {
@@ -80,7 +113,7 @@ func packWith(dataDir, controlDir, out string, epoch int64, chmod map[string]int
 			return err
 		}
 	}
-	return os.WriteFile(out, buf.Bytes(), 0o644)
+	return os.WriteFile(out, gzBuf.Bytes(), 0o644)
 }
 
 func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error) {
@@ -112,7 +145,10 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 		if err != nil {
 			return nil, err
 		}
-		name := path.Clean(filepath.ToSlash(rel))
+		name := "./" + path.Clean(filepath.ToSlash(rel))
+		if name == "./." {
+			continue
+		}
 		var payload []byte
 		if info.Mode().IsRegular() {
 			payload, err = os.ReadFile(abs)
@@ -135,7 +171,10 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 		hdr.Format = tar.FormatUSTAR
 		hdr.Mode = unixMode(info, payload)
 		if chmod != nil {
-			if mode, ok := chmod[name]; ok {
+			key := strings.TrimPrefix(name, "./")
+			if mode, ok := chmod[key]; ok {
+				hdr.Mode = mode
+			} else if mode, ok := chmod[name]; ok {
 				hdr.Mode = mode
 			}
 		}
@@ -178,55 +217,13 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 	return gzBuf.Bytes(), nil
 }
 
-type arMember struct {
-	name string
-	data []byte
-	mt   time.Time
-}
-
-func writeAr(w io.Writer, members []arMember) error {
-	if _, err := io.WriteString(w, "!<arch>\n"); err != nil {
-		return err
-	}
-	for _, m := range members {
-		name := m.name
-		if len(name) > 16 {
-			return fmt.Errorf("ar name too long: %s", name)
-		}
-		size := len(m.data)
-		hdr := fmt.Sprintf("%-16s%-12s%-6s%-6s%-8s%-10s`\n",
-			name,
-			strconv.FormatInt(m.mt.Unix(), 10),
-			"0",
-			"0",
-			"100644",
-			strconv.Itoa(size),
-		)
-		if len(hdr) != 60 {
-			return fmt.Errorf("ar header size %d", len(hdr))
-		}
-		if _, err := io.WriteString(w, hdr); err != nil {
-			return err
-		}
-		if _, err := w.Write(m.data); err != nil {
-			return err
-		}
-		if size%2 == 1 {
-			if _, err := w.Write([]byte{'\n'}); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func validateIpk(path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(string(b), "!<arch>\n") {
-		return fmt.Errorf("missing ar magic")
+	if len(b) < 2 || b[0] != 0x1f || b[1] != 0x8b {
+		return fmt.Errorf("missing gzip magic")
 	}
 	return nil
 }
