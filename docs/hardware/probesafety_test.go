@@ -29,6 +29,29 @@ func TestControlDependsUserland(t *testing.T) {
 	}
 }
 
+func TestControlStanzaKeepsArchitecture(t *testing.T) {
+	s := readRepoFile(t, "packaging", "control", "control")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimPrefix(s, "\ufeff")
+	s = strings.TrimRight(s, "\n")
+	para := s
+	if i := strings.Index(s, "\n\n"); i >= 0 {
+		para = s[:i]
+	}
+	lines := strings.Split(para, "\n")
+	var kept []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			t.Fatalf("whitespace-only line ends Entware opkg paragraph before Architecture:\n%s", s)
+		}
+		kept = append(kept, line)
+	}
+	joined := strings.Join(kept, "\n")
+	if !strings.Contains(joined, "Architecture: mipsel-3.4_kn") {
+		t.Fatal("Architecture must stay in the first control paragraph")
+	}
+}
+
 func TestPackagingControlNoKernelModulesOrNode(t *testing.T) {
 	s := readRepoFile(t, "packaging", "control", "control")
 	if strings.Contains(s, ".ko") {

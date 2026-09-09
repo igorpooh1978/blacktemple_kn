@@ -543,6 +543,11 @@
       "tests": ["tools/ipkpack/main_test.go::TestEntwareIpkIsGzipTar"],
       "redProof": "RED: TestEntwareIpkIsGzipTar FAIL while ipkpack emits raw ar; GREEN after gzip-ustar outer matching Entware opkg"
     },
+    "BTKN-PKG-005": {
+      "priority": "P0",
+      "tests": ["docs/hardware/probesafety_test.go::TestControlStanzaKeepsArchitecture"],
+      "redProof": "RED: TestControlStanzaKeepsArchitecture FAIL while control has a whitespace line that ends the opkg paragraph before Architecture; GREEN after"
+    },
     "BTKN-XRAY-007": {
       "priority": "P0",
       "tests": [

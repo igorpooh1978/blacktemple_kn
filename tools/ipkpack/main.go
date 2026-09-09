@@ -139,6 +139,20 @@ func tarGzDir(root string, mt time.Time, chmod map[string]int64) ([]byte, error)
 
 	var tarBuf bytes.Buffer
 	tw := tar.NewWriter(&tarBuf)
+	rootHdr := &tar.Header{
+		Name:     "./",
+		Mode:     0o755,
+		ModTime:  mt,
+		Uid:      0,
+		Gid:      0,
+		Uname:    "root",
+		Gname:    "root",
+		Typeflag: tar.TypeDir,
+		Format:   tar.FormatUSTAR,
+	}
+	if err := tw.WriteHeader(rootHdr); err != nil {
+		return nil, err
+	}
 	for _, rel := range files {
 		abs := filepath.Join(root, rel)
 		info, err := os.Lstat(abs)

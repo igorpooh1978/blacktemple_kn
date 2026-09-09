@@ -25,3 +25,9 @@ Feature: Packaging
     Given tools/ipkpack
     Then the outer package is gzip ustar with ./debian-binary ./data.tar.gz ./control.tar.gz
     And it is not a raw ar archive
+
+  @BTKN-PKG-005 @P0 @packaging
+  Scenario: Control stanza keeps Architecture in the first paragraph
+    Given packaging/control/control
+    Then the first Debian control paragraph includes Architecture
+    And it has no blank or whitespace-only lines before Architecture
