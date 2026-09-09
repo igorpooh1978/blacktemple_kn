@@ -112,6 +112,65 @@ show_dir() {
 	fi
 }
 
+classify_proc() {
+	_blob=$1
+	_class="UNKNOWN"
+	case "${_blob}" in
+		*blacktemple-kn*|*blacktempled*) _class="BLACKTEMPLE" ;;
+		*xkeen*|*XKeen*|*Xkeen*) _class="XKEEN/OTHER" ;;
+		*/opt/etc/xray*|*/opt/bin/xray*|*/opt/sbin/xray*) _class="XKEEN/OTHER" ;;
+	esac
+	echo "$_class"
+}
+
+report_proc() {
+	_pid=$1
+	echo "--- process ${_pid} ---"
+	if [ ! -d "/proc/${_pid}" ]; then
+		echo "NOT AVAILABLE: /proc/${_pid}"
+		return 0
+	fi
+	_exe="NOT AVAILABLE"
+	if [ -L "/proc/${_pid}/exe" ]; then
+		_exe=$(readlink "/proc/${_pid}/exe" 2>/dev/null) || _exe="NOT AVAILABLE"
+	fi
+	_cmd=""
+	if [ -r "/proc/${_pid}/cmdline" ]; then
+		_cmd=$(tr '\0' ' ' < "/proc/${_pid}/cmdline" 2>/dev/null)
+	fi
+	_class=$(classify_proc "${_exe} ${_cmd}")
+	echo "pid: ${_pid}"
+	echo "exe: ${_exe}" | redact
+	echo "cmdline: ${_cmd}" | redact
+	echo "class: ${_class}"
+	if [ -r "/proc/${_pid}/status" ]; then
+		grep -E '^(Name|VmRSS|VmSize|VmSwap|Threads|FDSize):' "/proc/${_pid}/status" 2>/dev/null | redact
+	else
+		echo "NOT AVAILABLE: /proc/${_pid}/status"
+	fi
+	if [ -r "/proc/${_pid}/cgroup" ]; then
+		echo "cgroup:"
+		cat "/proc/${_pid}/cgroup" 2>/dev/null | redact
+	else
+		echo "NOT AVAILABLE: /proc/${_pid}/cgroup"
+	fi
+	if [ -r "/proc/${_pid}/smaps_rollup" ]; then
+		echo "smaps_rollup:"
+		grep -E '^(Rss|Pss|Swap|SwapPss):' "/proc/${_pid}/smaps_rollup" 2>/dev/null | redact
+	else
+		echo "NOT AVAILABLE: /proc/${_pid}/smaps_rollup"
+	fi
+}
+
+excerpt_topic_lines() {
+	_file=$1
+	if [ ! -f "$_file" ] || [ ! -r "$_file" ]; then
+		return 0
+	fi
+	echo "--- excerpt ${_file} ---"
+	grep -n -E -i 'iptables|ipset|TPROXY|REDIRECT|MARK|CONNMARK|fwmark|[[:space:]]ip[[:space:]]+rule|[[:space:]]ip[[:space:]]+route|DNS|[[:space:]]53([^0-9]|$)|policy|routing-mark|proxy[[:space:]]*mode' "$_file" 2>/dev/null | head -n 20 | redact || echo "(no matching topic lines)"
+}
+
 # ----- SYSTEM -----
 section "SYSTEM"
 try "uname -a" uname -a
@@ -136,6 +195,92 @@ section "MEMORY"
 show_file /proc/meminfo
 try "free" free
 try "free -m" free -m
+show_file /proc/loadavg
+echo "--- process count ---"
+if [ -d /proc ]; then
+	_pc=0
+	for _pd in /proc/[0-9]*; do
+		[ -d "$_pd" ] || continue
+		_pc=$((_pc + 1))
+	done
+	echo "proc_count: ${_pc}"
+else
+	echo "NOT AVAILABLE: /proc"
+fi
+
+# ----- SWAP -----
+section "SWAP"
+show_file /proc/swaps
+show_file /proc/sys/vm/swappiness
+show_file /proc/sys/vm/overcommit_memory
+show_file /proc/sys/vm/overcommit_ratio
+show_file /proc/sys/vm/vfs_cache_pressure
+show_file /proc/sys/vm/dirty_ratio
+show_file /proc/sys/vm/dirty_background_ratio
+
+# ----- ZRAM / ZSWAP -----
+section "ZRAM"
+echo "--- /sys/block/zram* ---"
+_zram=0
+for _z in /sys/block/zram*; do
+	if [ -e "$_z" ]; then
+		_zram=1
+		ls -ld "$_z" 2>&1 | redact
+	fi
+done
+if [ "$_zram" -eq 0 ]; then
+	echo "NOT AVAILABLE"
+fi
+echo "--- zswap enabled ---"
+if [ -r /sys/module/zswap/parameters/enabled ]; then
+	cat /sys/module/zswap/parameters/enabled 2>&1 | redact
+else
+	echo "NOT AVAILABLE"
+fi
+
+# ----- CGROUP -----
+section "CGROUP"
+show_file /proc/cgroups
+try "mount" mount
+show_file /proc/self/cgroup
+echo "--- cgroup filesystem ---"
+show_dir /sys/fs/cgroup
+show_dir /sys/fs/cgroup/memory
+echo "--- cgroup version (read-only) ---"
+_cgver="NONE"
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+	_cgver="V2"
+elif [ -d /sys/fs/cgroup/memory ]; then
+	_cgver="V1"
+elif [ -r /proc/cgroups ]; then
+	if grep -q '^memory' /proc/cgroups 2>/dev/null; then
+		_cgver="UNKNOWN"
+	fi
+fi
+echo "cgroup_version: ${_cgver}"
+echo "--- memory controller files (read only, never written) ---"
+for _f in \
+	/sys/fs/cgroup/memory/memory.swappiness \
+	/sys/fs/cgroup/memory/memory.limit_in_bytes \
+	/sys/fs/cgroup/memory/memory.soft_limit_in_bytes \
+	/sys/fs/cgroup/memory/memory.usage_in_bytes \
+	/sys/fs/cgroup/memory/memory.stat \
+	/sys/fs/cgroup/cgroup.controllers \
+	/sys/fs/cgroup/memory.current \
+	/sys/fs/cgroup/memory.high \
+	/sys/fs/cgroup/memory.max \
+	/sys/fs/cgroup/memory.swap.current \
+	/sys/fs/cgroup/memory.swap.max \
+	/sys/fs/cgroup/memory.stat
+do
+	show_file "$_f"
+done
+echo "--- memory controller mounted? ---"
+if mount 2>/dev/null | grep -q -e 'cgroup.*memory' -e 'cgroup2'; then
+	mount 2>/dev/null | grep -e cgroup | redact
+else
+	echo "NOT OBSERVED: cgroup memory mount"
+fi
 
 # ----- FILESYSTEM -----
 section "FILESYSTEM"
@@ -332,10 +477,57 @@ show_dir /opt/etc/dnsmasq.d
 show_dir /opt/etc/xkeen
 echo "--- DNS-related processes ---"
 if have ps; then
-	ps w 2>/dev/null | redact | grep -i -e dnsmasq -e ndnproxy -e unbound -e dnscrypt -e xkeen || echo "no matching DNS processes"
+	ps w 2>/dev/null | redact | grep -i -e dnsmasq -e ndnproxy -e unbound -e dnscrypt -e xkeen -e adguard || echo "no matching DNS processes"
 else
 	echo "NOT AVAILABLE: ps"
 fi
+echo "--- who listens on TCP 53 / UDP 53 ---"
+_dns_tcp="NOT OBSERVED"
+_dns_udp="NOT OBSERVED"
+if have netstat; then
+	echo "--- netstat -lnt (TCP) :53 ---"
+	netstat -lnt 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no TCP :53"
+	echo "--- netstat -lnu (UDP) :53 ---"
+	netstat -lnu 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no UDP :53"
+	echo "--- netstat -lntup :53 ---"
+	netstat -lntup 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no :53 lines"
+	if netstat -lnt 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
+		_dns_tcp="PRESENT"
+	fi
+	if netstat -lnu 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
+		_dns_udp="PRESENT"
+	fi
+elif have ss; then
+	echo "--- ss -lnt :53 ---"
+	ss -lnt 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no TCP :53"
+	echo "--- ss -lnu :53 ---"
+	ss -lnu 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no UDP :53"
+	echo "--- ss -lntup :53 ---"
+	ss -lntup 2>/dev/null | redact | grep -E '[:.]53[[:space:]]' || echo "no :53 lines"
+	if ss -lnt 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
+		_dns_tcp="PRESENT"
+	fi
+	if ss -lnu 2>/dev/null | grep -E '[:.]53[[:space:]]' >/dev/null; then
+		_dns_udp="PRESENT"
+	fi
+else
+	echo "NOT AVAILABLE: netstat/ss"
+fi
+echo "tcp53_listener: ${_dns_tcp}"
+echo "udp53_listener: ${_dns_udp}"
+echo "--- DNS service hints (process names only) ---"
+_keen_dns="NOT OBSERVED"
+_adg="NOT OBSERVED"
+_other_dns="NOT OBSERVED"
+if have ps; then
+	_ps=$(ps w 2>/dev/null)
+	echo "$_ps" | redact | grep -i -e ndnproxy -e 'dnsmasq' >/dev/null && _keen_dns="PRESENT"
+	echo "$_ps" | redact | grep -i adguard >/dev/null && _adg="PRESENT"
+	echo "$_ps" | redact | grep -i -e unbound -e dnscrypt -e named -e 'systemd-resolve' >/dev/null && _other_dns="PRESENT"
+fi
+echo "keenetic_dns_hint: ${_keen_dns}"
+echo "adguard_hint: ${_adg}"
+echo "other_dns_hint: ${_other_dns}"
 
 # ----- XRAY -----
 section "XRAY"
@@ -355,6 +547,27 @@ if have ps; then
 	ps w 2>/dev/null | redact | grep -i xray || echo "no xray process"
 else
 	echo "NOT AVAILABLE: ps"
+fi
+echo "--- per-PID xray / blacktempled (classified; not every pidof) ---"
+_xray_pids=0
+for _d in /proc/[0-9]*; do
+	[ -d "$_d" ] || continue
+	_pid=${_d#/proc/}
+	_name=""
+	[ -r "${_d}/comm" ] && _name=$(cat "${_d}/comm" 2>/dev/null)
+	_cmd=""
+	[ -r "${_d}/cmdline" ] && _cmd=$(tr '\0' ' ' < "${_d}/cmdline" 2>/dev/null)
+	_exe=""
+	[ -L "${_d}/exe" ] && _exe=$(readlink "${_d}/exe" 2>/dev/null)
+	case "${_name} ${_cmd} ${_exe}" in
+		*xray*|*Xray*|*XRAY*|*blacktempled*)
+			report_proc "$_pid"
+			_xray_pids=$((_xray_pids + 1))
+			;;
+	esac
+done
+if [ "$_xray_pids" -eq 0 ]; then
+	echo "no xray/blacktempled /proc pids"
 fi
 if have xray; then
 	echo "--- xray version ---"
@@ -385,6 +598,13 @@ for _p in /opt/etc/xkeen /opt/sbin/xkeen /opt/bin/xkeen /opt/etc/xray/configs; d
 		echo "NOT AVAILABLE: ${_p}"
 	fi
 done
+echo "--- xkeen version/help (read-only flags only) ---"
+if have xkeen; then
+	try "xkeen -v" xkeen -v
+	try "xkeen -h" xkeen -h
+else
+	echo "NOT AVAILABLE: xkeen"
+fi
 if have ps; then
 	echo "--- xkeen processes ---"
 	ps w 2>/dev/null | redact | grep -i xkeen || echo "no xkeen process"
@@ -394,16 +614,55 @@ else
 	echo "NOT AVAILABLE: ps"
 fi
 echo "--- xkeen-related chains ---"
+_xkeen_nat="NOT OBSERVED"
+_xkeen_mangle="NOT OBSERVED"
 if have iptables; then
-	iptables -t nat -S 2>&1 | redact | grep -i -e xkeen -e XKEEN || echo "no xkeen tokens in nat"
-	iptables -t mangle -S 2>&1 | redact | grep -i -e xkeen -e XKEEN || echo "no xkeen tokens in mangle"
+	if iptables -t nat -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
+		_xkeen_nat="PRESENT"
+		iptables -t nat -S 2>&1 | redact | grep -i -e xkeen -e XKEEN
+	else
+		echo "no xkeen tokens in nat"
+	fi
+	if iptables -t mangle -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
+		_xkeen_mangle="PRESENT"
+		iptables -t mangle -S 2>&1 | redact | grep -i -e xkeen -e XKEEN
+	else
+		echo "no xkeen tokens in mangle"
+	fi
 	iptables -t filter -S 2>&1 | redact | grep -i -e xkeen -e XKEEN || echo "no xkeen tokens in filter"
 else
 	echo "NOT AVAILABLE: iptables"
 fi
-echo "--- xkeen DNS hooks (dir listing only) ---"
+echo "--- xkeen DNS hooks (dir listing) ---"
 show_dir /opt/etc/xkeen
 show_dir /opt/etc/ndm/netfilter.d
+echo "--- xkeen init/hook topic excerpts (limited lines; not a full dump) ---"
+_nexcerpt=0
+_hook_stop=0
+for _hookdir in /opt/etc/xkeen /opt/etc/ndm/netfilter.d /opt/etc/ndm/fs.d /opt/etc/init.d /opt/etc/xray; do
+	[ -d "$_hookdir" ] || continue
+	for _hf in "$_hookdir"/*; do
+		[ -f "$_hf" ] || continue
+		_base=$(echo "$_hf" | grep -i -e xkeen -e xray -e tproxy -e redirect || true)
+		# Always scan xkeen dirs; elsewhere only name-matched files.
+		case "$_hookdir" in
+			*/xkeen*|*/netfilter.d|*/fs.d)
+				:
+				;;
+			*)
+				[ -n "$_base" ] || continue
+				;;
+		esac
+		_nexcerpt=$((_nexcerpt + 1))
+		if [ "$_nexcerpt" -gt 12 ]; then
+			echo "(further hook files skipped)"
+			_hook_stop=1
+			break
+		fi
+		excerpt_topic_lines "$_hf"
+	done
+	[ "${_hook_stop:-0}" -eq 1 ] && break
+done
 echo "--- xkeen-related listen ports ---"
 if have netstat; then
 	netstat -lntup 2>&1 | redact | grep -i -e xray -e xkeen || echo "no xray/xkeen listen lines"
@@ -412,6 +671,34 @@ elif have ss; then
 else
 	echo "NOT AVAILABLE: netstat/ss"
 fi
+echo "--- XKeen capability summary (observed only) ---"
+_xk_inst="NO"
+if have xkeen || [ -e /opt/sbin/xkeen ] || [ -e /opt/bin/xkeen ] || [ -d /opt/etc/xkeen ]; then
+	_xk_inst="YES"
+fi
+echo "XKeen installed: ${_xk_inst}"
+echo "version: see xkeen -v above or UNKNOWN"
+_xk_xray="UNKNOWN"
+for _p in /opt/sbin/xray /opt/bin/xray /opt/etc/xray; do
+	if [ -e "$_p" ]; then
+		_xk_xray=$_p
+		break
+	fi
+done
+echo "Xray path: ${_xk_xray}"
+if [ -d /opt/etc/xray/configs ]; then
+	echo "Xray config dir: /opt/etc/xray/configs"
+elif [ -d /opt/etc/xray ]; then
+	echo "Xray config dir: /opt/etc/xray"
+else
+	echo "Xray config dir: UNKNOWN"
+fi
+echo "capture hints: UNKNOWN until topic excerpts/iptables names reviewed"
+echo "DNS interception hints: UNKNOWN"
+echo "PBR/mark hints: UNKNOWN"
+echo "own chains: nat=${_xkeen_nat} mangle=${_xkeen_mangle}"
+echo "own ports: see listen lines"
+echo "Entware traffic handling hints: UNKNOWN"
 
 # ----- INIT -----
 section "INIT"
@@ -441,6 +728,103 @@ section "SOCKETS"
 try "netstat -lntup" netstat -lntup
 try "ss -lntup" ss -lntup
 try "netstat -ln" netstat -ln
+
+# ----- BASELINE -----
+section "BASELINE"
+echo "--- pre-BlackTemple resource snapshot ---"
+if [ -r /proc/meminfo ]; then
+	grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null | redact
+else
+	echo "NOT AVAILABLE: /proc/meminfo"
+fi
+show_file /proc/loadavg
+echo "--- /opt free ---"
+if have df; then
+	df /opt 2>&1 | redact
+	df -h /opt 2>&1 | redact
+else
+	echo "NOT AVAILABLE: df"
+fi
+echo "--- process count ---"
+echo "proc_count: ${_pc:-UNKNOWN}"
+echo "--- current Xray RSS/VmSwap (classified pids) ---"
+_saw_xray=0
+for _d in /proc/[0-9]*; do
+	[ -d "$_d" ] || continue
+	_pid=${_d#/proc/}
+	_name=""
+	[ -r "${_d}/comm" ] && _name=$(cat "${_d}/comm" 2>/dev/null)
+	case "$_name" in
+		xray|Xray)
+			_saw_xray=1
+			echo "pid ${_pid}:"
+			grep -E '^(VmRSS|VmSwap):' "${_d}/status" 2>/dev/null | redact
+			;;
+	esac
+done
+if [ "$_saw_xray" -eq 0 ]; then
+	echo "no comm=xray processes"
+fi
+
+# ----- SUMMARY -----
+section "SUMMARY"
+_swap_present="NO"
+_swap_size="0"
+_swap_used="0"
+if [ -r /proc/swaps ]; then
+	_swap_n=$(awk 'NR>1 && $1 != "" {c++} END {print c+0}' /proc/swaps 2>/dev/null)
+	if [ "${_swap_n:-0}" -gt 0 ]; then
+		_swap_present="YES"
+	fi
+	_swap_size=$(awk 'NR>1 {s+=$3} END {print s+0}' /proc/swaps 2>/dev/null)
+	_swap_used=$(awk 'NR>1 {s+=$4} END {print s+0}' /proc/swaps 2>/dev/null)
+fi
+_swappiness="NOT AVAILABLE"
+[ -r /proc/sys/vm/swappiness ] && _swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null)
+_zram_yn="NO"
+for _z in /sys/block/zram*; do
+	[ -e "$_z" ] && _zram_yn="YES"
+done
+_zswap_yn="NO"
+if [ -r /sys/module/zswap/parameters/enabled ]; then
+	_zs=$(cat /sys/module/zswap/parameters/enabled 2>/dev/null)
+	if [ "$_zs" = "Y" ] || [ "$_zs" = "1" ]; then
+		_zswap_yn="YES"
+	else
+		_zswap_yn="NO"
+	fi
+fi
+_memcg="NONE"
+_memcg_mounted="NO"
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+	_memcg="V2"
+	if grep -qw memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null; then
+		_memcg_mounted="YES"
+	fi
+elif [ -d /sys/fs/cgroup/memory ]; then
+	_memcg="V1"
+	_memcg_mounted="YES"
+fi
+_per_swap="UNKNOWN"
+if [ -r /sys/fs/cgroup/memory/memory.swappiness ]; then
+	_per_swap="YES"
+elif [ -r /sys/fs/cgroup/memory.swap.max ]; then
+	_per_swap="YES"
+elif [ "$_memcg" = "NONE" ]; then
+	_per_swap="NO"
+fi
+echo "Swap present: ${_swap_present}"
+echo "Swap size: ${_swap_size}"
+echo "Swap used: ${_swap_used}"
+echo "Swappiness: ${_swappiness}"
+echo "ZRAM: ${_zram_yn}"
+echo "ZSWAP: ${_zswap_yn}"
+echo "Memory cgroup: ${_memcg}"
+echo "memory controller mounted: ${_memcg_mounted}"
+echo "Per-process swap control possible: ${_per_swap}"
+echo "tcp53_listener: ${_dns_tcp:-UNKNOWN}"
+echo "udp53_listener: ${_dns_udp:-UNKNOWN}"
+echo "NOTE: TPROXY/REDIRECT/MARK in iptables help is PRESENT/NOT OBSERVED, not SUPPORTED"
 
 echo ""
 echo "===== END ====="

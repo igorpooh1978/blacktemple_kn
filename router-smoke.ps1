@@ -133,6 +133,11 @@ Write-Host 'copying read-only probe via scp.exe'
 $scpAll = $scpArgs + @($lfPath, $remoteTarget)
 & $scpExe @scpAll
 if ($LASTEXITCODE -ne 0) {
+    if (-not $idPath) {
+        Write-Host 'SSH_KEY_REQUIRED'
+        Write-ProbeNotRun -Reason 'scp failed without IdentityFile/BTKN_SSH_IDENTITY/SSH agent; password SSH is not automated'
+        exit 0
+    }
     Write-ProbeNotRun -Reason "scp failed (exit $LASTEXITCODE); connection or credentials"
     exit 0
 }

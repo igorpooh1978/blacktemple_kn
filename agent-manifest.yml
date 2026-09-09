@@ -10,7 +10,8 @@ waves:
   r5_status: integrated
   engine_vertical_slice: complete
   merge_authorized: false
-  next_recommended: REAL KN-1011 READ-ONLY PROBE (not started); do not start R6
+  next_recommended: ORCHESTRATOR DECISION after KN-1011 evidence (R6 not started)
+  r51_status: in_progress
   R4:
     name: Minimal blacktempled + embedded UI + engine vertical slice
     base_sha: 41099b953e8318d2c6115e04521a2f9821627378
