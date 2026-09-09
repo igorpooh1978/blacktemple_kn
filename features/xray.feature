@@ -17,3 +17,21 @@ Feature: Xray configuration
   Scenario: Transparent inbound is not a forward proxy
     Given a transparent golden config
     Then SOCKS remains on 11080 and 11820 is not SOCKS
+
+  @BTKN-XRAY-004 @P0 @xray
+  Scenario: Transparent port is 11820 and must not use XKeen 1181
+    Given hybrid generate or StartTransparent
+    Then the tunnel port is 11820
+    And 1181 is rejected as reserved
+
+  @BTKN-XRAY-005 @P0 @xray
+  Scenario: Invalid transparent Xray config is rejected
+    Given malformed or reserved-port options
+    When generate runs
+    Then the config is rejected
+
+  @BTKN-XRAY-006 @P0 @xray
+  Scenario: Xray secret redaction
+    Given a generated config containing a UUID
+    When Redact runs
+    Then the secret is not present in diagnostics

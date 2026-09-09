@@ -151,6 +151,41 @@ func TestTUNIsCandidateNotReady(t *testing.T) {
 	}
 }
 
+func TestDetectReportsHybridPrepareRequired(t *testing.T) {
+	f := newFakeRunner()
+	f.files["/opt/sbin/ip"] = ""
+	f.files["/opt/sbin/iptables"] = ""
+	f.files["/opt/sbin/ipset"] = ""
+	f.files["/proc/net/ip_tables_targets"] = "REDIRECT MARK CONNMARK"
+	f.files["/proc/net/ip_tables_matches"] = "socket set addrtype conntrack"
+	f.files["/proc/modules"] = "xt_socket"
+	f.files["/proc/sys/kernel/osrelease"] = "4.9-ndm-5"
+	f.files["/lib/modules/4.9-ndm-5/xt_TPROXY.ko"] = ""
+	f.cmds["ip -4 rule show"] = cmdResult{out: "0:\tfrom all lookup local\n", err: nil}
+	f.cmds["ipset --version"] = cmdResult{out: "ipset v7", err: nil}
+	rep, err := Detect(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Engine != EngineHybridPrepareRequired {
+		t.Fatalf("want HYBRID_PREPARE_REQUIRED got %s", rep.Engine)
+	}
+}
+
+func TestDetectNoUsableEngine(t *testing.T) {
+	f := newFakeRunner()
+	rep, err := Detect(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Engine != EngineNoUsable {
+		t.Fatalf("want NO_USABLE_ENGINE got %s", rep.Engine)
+	}
+	if rep.XKeenInstalled {
+		t.Fatal("absent XKeen must not be treated as installed")
+	}
+}
+
 func TestRequirementsComeFromRouting(t *testing.T) {
 	req := routing.HybridRequirements()
 	if len(req.UserlandTools) == 0 || !req.NeedIPSet || !req.NeedPolicyRouting {
@@ -182,6 +217,35 @@ func TestPrepareDoesNotApplyCapture(t *testing.T) {
 	}
 	if sawIPT || sawRule {
 		t.Fatal("Prepare must not create BTKN rules")
+	}
+}
+
+func TestPrepareSuccessDoesNotMutateSysctlOrPackages(t *testing.T) {
+	f := newFakeRunner()
+	hybridPresent(f)
+	var sawSysctl, sawOpkgMut, sawInsmod, sawRmmod bool
+	wrapped := &recordingRunner{inner: f, onRun: func(name string, args []string) {
+		if name == "sysctl" {
+			sawSysctl = true
+		}
+		if name == "insmod" {
+			sawInsmod = true
+		}
+		if name == "rmmod" {
+			sawRmmod = true
+		}
+		if name == "opkg" && len(args) > 0 {
+			switch args[0] {
+			case "install", "remove", "update", "upgrade":
+				sawOpkgMut = true
+			}
+		}
+	}}
+	if _, err := Prepare(context.Background(), wrapped); err != nil {
+		t.Fatal(err)
+	}
+	if sawSysctl || sawOpkgMut || sawInsmod || sawRmmod {
+		t.Fatal("Prepare must not change sysctl, install packages, or load/unload modules")
 	}
 }
 

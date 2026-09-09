@@ -56,3 +56,50 @@ Feature: Routing capture
     Then it is treated as absent
     And Permission denied plus exit status 1 is ErrCleanupIncomplete
     And double Remove on a clean system returns nil
+
+  @BTKN-ROUT-009 @P0 @routing
+  Scenario: Capture is selected-client only
+    Given a hybrid plan
+    Then unmarked foreign clients are not captured
+
+  @BTKN-ROUT-010 @P0 @routing
+  Scenario: Private and local destinations stay DIRECT
+    Given a hybrid plan
+    Then RFC1918 and local CIDRs are excluded from capture
+
+  @BTKN-ROUT-011 @P0 @routing
+  Scenario: TCP path uses REDIRECT to 11820
+    Given a hybrid plan
+    Then nat PREROUTING REDIRECT targets 11820
+
+  @BTKN-ROUT-012 @P0 @routing
+  Scenario: XKeen detected allows Plan and refuses Apply
+    Given XKeen coexistence evidence
+    When Plan and Apply run
+    Then Plan succeeds and Apply is rejected
+
+  @BTKN-ROUT-013 @P0 @routing
+  Scenario: Mark and table collisions fail preflight
+    Given a foreign fwmark or table 4254
+    When Preflight runs
+    Then Apply is refused without auto-picking another mark
+
+  @BTKN-ROUT-014 @P0 @routing
+  Scenario: No OUTPUT capture of Xray outbound
+    Given a hybrid plan
+    Then OUTPUT is not used to recapture proxy traffic
+
+  @BTKN-ROUT-015 @P0 @routing
+  Scenario: No foreign or global flush
+    Given Apply and Remove
+    Then iptables -F of foreign chains is forbidden
+
+  @BTKN-ROUT-016 @P0 @routing
+  Scenario: IPv6 capture remains untouched
+    Given a hybrid plan
+    Then ip6tables capture is not installed
+
+  @BTKN-ROUT-017 @P0 @routing
+  Scenario: Partial Apply joins cleanup errors
+    Given Apply failure plus Remove failure
+    Then both errors are reported

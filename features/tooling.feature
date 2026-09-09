@@ -63,3 +63,27 @@ Feature: Hardware tooling
     And killall awk or pkill sh is forbidden
     And a foreign process whose cmdline only resembles the probe script survives
     And this is proven by executable shell acceptance on Linux /proc
+
+  @BTKN-TOOL-018 @P0 @hardware
+  Scenario: Read-only dump budget can reach END within the global deadline
+    Given scripts/router-probe.sh
+    Then try_net count times CMD_SEC plus overhead is below MAX_SEC
+    And the global deadline stays 180 seconds
+    And ===== END ===== is present
+
+  @BTKN-TOOL-019 @P0 @hardware
+  Scenario: SSH password is never placed on argv or logs
+    Given router-smoke.ps1
+    Then BTKN_SSH_PASSWORD is not ssh argv
+    And sshpass is absent
+
+  @BTKN-TOOL-020 @P0 @hardware
+  Scenario: Raw research traces stay gitignored
+    Given .gitignore
+    Then .research-local/ and *.log are ignored
+
+  @BTKN-TOOL-021 @P0 @hardware
+  Scenario: Live routing smoke stays gated
+    Given router-smoke.ps1
+    Then mutation gates are required
+    And APP_SMOKE_NOT_WIRED remains the live-routing reason

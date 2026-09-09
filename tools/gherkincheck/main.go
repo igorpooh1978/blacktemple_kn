@@ -102,10 +102,24 @@ func run(root string) error {
 		if s.Priority == "P0" && len(ent.Tests) == 0 {
 			return fmt.Errorf("%s is P0 but has no tests mapping", id)
 		}
+		if s.Priority != "" && ent.Priority != "" && s.Priority != ent.Priority {
+			return fmt.Errorf("%s feature tag %s != map priority %s", id, s.Priority, ent.Priority)
+		}
+		if s.Priority == "P0" && ent.Priority != "P0" {
+			return fmt.Errorf("%s is P0 but scenario-map priority is %q", id, ent.Priority)
+		}
+		seenRefs := map[string]bool{}
 		for _, rel := range ent.Tests {
+			if seenRefs[rel] {
+				return fmt.Errorf("%s duplicate mapping %q", id, rel)
+			}
+			seenRefs[rel] = true
 			testPath, fn, ok := splitTestRef(rel)
 			if !ok {
 				return fmt.Errorf("%s: invalid test ref %q (want path::Func)", id, rel)
+			}
+			if s.Priority == "P0" && (fn == "" || !strings.HasPrefix(fn, "Test")) {
+				return fmt.Errorf("%s P0 mapping %q must be path::TestName", id, rel)
 			}
 			abs := filepath.Join(root, filepath.FromSlash(testPath))
 			b, err := os.ReadFile(abs)

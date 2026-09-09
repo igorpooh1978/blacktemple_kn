@@ -11,37 +11,41 @@ Behavior → Gherkin → executable acceptance → RED → production code → G
 
 Временные RED-мутации не коммитятся. Если RED нельзя доказать безопасно: `RED_PROOF_NOT_AVAILABLE` в `scenario-map.json`.
 
-## Current map (R6-H.1 FIX-2)
+## Current map (R6-G)
 
-Counts from `go run ./tools/gherkincheck`:
+Counts from `go run ./tools/gherkincheck` (RUN):
 
 ```text
-scenarios=36
-p0=36
+scenarios=86
+p0=86
 p1=0
 p2=0
 features=12
-mapped=36
+mapped=86
 ```
 
-RED proofs this iteration (tests against `65cbb2f`, no temporary production mutation committed):
+R6-G retrofits P0 coverage of **current** production behavior. New Scenario IDs map existing tests; duplicates of PROF-001…TOOL-017 were not created.
 
-- `BTKN-TOOL-015` / name-only reap — `TestNoNameOnlyOrphanReap` FAIL on `btkn_reap_other_probe_scripts`
-- executable D — `--cleanup-orphans` killed a foreign `btkn-router-probe.sh` cmdline decoy (`FAIL: D foreign similar-cmdline was killed`)
-- executable A/G hung or printed `FOREIGN_OR_UNKNOWN_PROCESS` until supervisor/worker + `router-probe.sh` identity
+New this wave (non-exhaustive): PROF-003…007, CONN-002…006, XRAY-004…006, ROUT-009…017, KEEN-005…010, LIFE-003…008, ATOM-002, GEO-002…005, LIST-003…006, POL-003…004, PKG-002, TOOL-018…021.
 
-GREEN: `docs/hardware/probe_safety_exec.sh` via `TestProbeExecutableProcessSafety` (Linux /proc). Windows skips the exec test; static `TestNoNameOnlyOrphanReap` still runs.
+`gherkincheck` now also rejects:
 
-New TOOL scenarios this iteration:
+- P0 mapping without `path::TestName`
+- feature vs map priority mismatch
+- duplicate test refs on the same Scenario ID
 
-- `BTKN-TOOL-011` SSH cat EOF
-- `BTKN-TOOL-012` single-instance probe
-- `BTKN-TOOL-013` stale lock recovery
-- `BTKN-TOOL-014` hard runtime tree kill
-- `BTKN-TOOL-015` no CPU storm leftovers
-- `BTKN-TOOL-016` one-pass redactor
-- `BTKN-TOOL-017` never kill Xray/XKeen/arbitrary awk
+## RED this wave
 
-Also: `BTKN-ROUT-031` (H1-A), `BTKN-KEEN-003` / `BTKN-KEEN-004` (H1-C).
+- `BTKN-TOOL-018` dump budget — on exact `03e9fea` `TestProbeDumpBudgetFitsDeadline` FAIL:
 
-Hardware probe self-protection is diagnostic infrastructure: single instance, bounded, self-terminating, owned-tree only.
+```text
+try_net=28 loop_extra=11 cmd_sec=10 overhead=20 worst=410s >= max_sec=180
+```
+
+Production dump then collapsed (CMD_SEC default 4, duplicate netstat/ip/opkg dumps bounded or skipped). Temporary production mutation was not required.
+
+Other newly mapped scenarios: `RED_PROOF_NOT_AVAILABLE` (already GREEN on `03e9fea`; overlapping H.1 RED proofs remain for TOOL-011…017, ROUT-031, KEEN-003).
+
+Do not claim 100% RED proof.
+
+H.1 process-safety executable coverage is unchanged: `docs/hardware/probe_safety_exec.sh` via `TestProbeExecutableProcessSafety`.

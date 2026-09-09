@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -367,6 +368,58 @@ func TestCopyScriptViaSshCatClosesStdin(t *testing.T) {
 			t.Fatalf("ssh timeout cleanup missing %q", want)
 		}
 	}
+}
+
+func TestProbeDumpBudgetFitsDeadline(t *testing.T) {
+	s := readProbeScript(t)
+	if !strings.Contains(s, "===== END =====") {
+		t.Fatal("probe must print ===== END =====")
+	}
+	maxSec := probeShellDefaultInt(t, s, "BTKN_PROBE_MAX_SEC")
+	cmdSec := probeShellDefaultInt(t, s, "BTKN_PROBE_CMD_SEC")
+	if maxSec > 180 {
+		t.Fatalf("must not raise global deadline above 180s, got %d", maxSec)
+	}
+	idx := strings.Index(s, `# ----- NETWORK -----`)
+	if idx < 0 {
+		t.Fatal("missing NETWORK section")
+	}
+	worker := s[idx:]
+	n := strings.Count(worker, `try_net "`)
+	loopExtra := 0
+	if strings.Contains(worker, `try_net "ip route show table ${_tbl}"`) {
+		re := regexp.MustCompile(`head -n ([0-9]+)`)
+		m := re.FindStringSubmatch(worker)
+		if len(m) != 2 {
+			t.Fatal("policy-table loop must cap with head -n N")
+		}
+		capN, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if capN > 0 {
+			loopExtra = capN - 1
+		}
+	}
+	const supervisorOverheadSec = 20
+	worst := (n+loopExtra)*cmdSec + supervisorOverheadSec
+	if worst >= maxSec {
+		t.Fatalf("read-only dump cannot reach END: try_net=%d loop_extra=%d cmd_sec=%d overhead=%d worst=%ds >= max_sec=%d", n, loopExtra, cmdSec, supervisorOverheadSec, worst, maxSec)
+	}
+}
+
+func probeShellDefaultInt(t *testing.T, script, name string) int {
+	t.Helper()
+	re := regexp.MustCompile(name + `="\$\{` + name + `:-([0-9]+)\}"`)
+	m := re.FindStringSubmatch(script)
+	if len(m) != 2 {
+		t.Fatalf("missing %s default", name)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func TestProbeRecordsModprobePresence(t *testing.T) {

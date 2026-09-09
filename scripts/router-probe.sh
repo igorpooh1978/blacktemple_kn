@@ -7,7 +7,7 @@
 BTKN_PROBE_LOCKDIR="${BTKN_PROBE_LOCKDIR:-/tmp/btkn-router-probe.lock}"
 BTKN_PROBE_MAX_SEC="${BTKN_PROBE_MAX_SEC:-180}"
 BTKN_PROBE_GRACE_SEC="${BTKN_PROBE_GRACE_SEC:-2}"
-BTKN_PROBE_CMD_SEC="${BTKN_PROBE_CMD_SEC:-10}"
+BTKN_PROBE_CMD_SEC="${BTKN_PROBE_CMD_SEC:-4}"
 BTKN_PROBE_MAX_BYTES=262144
 BTKN_WATCHDOG_PID=""
 BTKN_SUPERVISOR_RUN_ID=""
@@ -713,6 +713,7 @@ echo "blacktemple-kn router-probe"
 echo "run_id=${BTKN_PROBE_RUN_ID}"
 echo "lock=${BTKN_PROBE_LOCKDIR}"
 echo "max_sec=${BTKN_PROBE_MAX_SEC}"
+echo "cmd_sec=${BTKN_PROBE_CMD_SEC}"
 
 # ----- SYSTEM -----
 section "SYSTEM"
@@ -861,18 +862,20 @@ tool_path netstat
 section "NETWORK"
 show_file /proc/net/dev
 try_net "ip addr" ip addr
-try_net "ip -s link" ip -s link
-try_net "ip neigh" ip neigh
+echo "--- ip -s link ---"
+echo "BOUNDED: BusyBox ip has no -s; see ip addr"
+echo "--- ip neigh ---"
+show_file /proc/net/arp
+echo "BOUNDED: skipped ip neigh; ARP table is /proc/net/arp"
 
 # ----- ROUTING -----
 section "ROUTING"
 try_net "ip route" ip route
-try_net "ip route show table main" ip route show table main
-try_net "ip route show table default" ip route show table default
-try_net "ip route show table local" ip route show table local
-try_net "ip route show table all" ip route show table all
+echo "--- ip route show table main/default/local/all ---"
+echo "BOUNDED: skipped duplicate table dumps; see ip route"
 try_net "ip rule" ip rule
-try_net "ip rule list" ip rule list
+echo "--- ip rule list ---"
+echo "BOUNDED: skipped duplicate of ip rule"
 echo "--- policy tables referenced by ip rule ---"
 if have ip; then
 	_seen_tbl=" "
@@ -880,10 +883,10 @@ if have ip; then
 		for (i = 1; i <= NF; i++) {
 			if ($i == "lookup" && (i + 1) <= NF) print $(i + 1)
 		}
-	}' | head -n 12 | while IFS= read -r _tbl; do
+	}' | head -n 3 | while IFS= read -r _tbl; do
 		[ -n "$_tbl" ] || continue
 		case "$_tbl" in
-			unspec|all) continue ;;
+			unspec|all|main|default|local) continue ;;
 		esac
 		echo " $_seen_tbl " | grep -q " $_tbl " && continue
 		_seen_tbl="${_seen_tbl}${_tbl} "
@@ -905,10 +908,10 @@ fi
 section "FIREWALL"
 try "iptables --version" iptables --version
 try "ip6tables --version" ip6tables --version
-try "nft list tables" nft list tables
+try_net "nft list tables" nft list tables
 if have ndmc; then
-	try "ndmc show version" ndmc -c show version
-	try "ndmc show system" ndmc -c show system
+	try_net "ndmc show version" ndmc -c show version
+	try_net "ndmc show system" ndmc -c show system
 else
 	echo "--- ndmc ---"
 	echo "NOT AVAILABLE: ndmc"
@@ -916,7 +919,8 @@ fi
 
 # ----- IPTABLES -----
 section "IPTABLES"
-try "iptables --version" iptables --version
+echo "--- iptables --version ---"
+echo "SEE FIREWALL section"
 if have iptables; then
 	try_net "iptables -t nat -S" iptables -t nat -S
 	try_net "iptables -t mangle -S" iptables -t mangle -S
@@ -929,7 +933,8 @@ fi
 
 # ----- IP6TABLES -----
 section "IP6TABLES"
-try "ip6tables --version" ip6tables --version
+echo "--- ip6tables --version ---"
+echo "SEE FIREWALL section"
 if have ip6tables; then
 	try_net "ip6tables -t nat -S" ip6tables -t nat -S
 	try_net "ip6tables -t mangle -S" ip6tables -t mangle -S
@@ -956,11 +961,7 @@ show_file /proc/net/ip_tables_matches
 show_file /proc/net/ip6_tables_targets
 show_file /proc/net/ip6_tables_matches
 echo "--- iptables help (read-only) ---"
-if have iptables; then
-	iptables -h 2>&1 | redact
-else
-	echo "NOT AVAILABLE: iptables"
-fi
+echo "BOUNDED: skipped iptables -h; see /proc/net/ip_tables_targets"
 echo "--- TPROXY MARK CONNMARK REDIRECT (read-only evidence) ---"
 for _t in TPROXY MARK CONNMARK REDIRECT; do
 	_src=""
@@ -970,16 +971,6 @@ for _t in TPROXY MARK CONNMARK REDIRECT; do
 	if [ -r /proc/modules ]; then
 		if grep -q "xt_${_t}" /proc/modules 2>/dev/null || grep -q "ipt_${_t}" /proc/modules 2>/dev/null; then
 			_src="${_src} proc_modules"
-		fi
-	fi
-	if have lsmod; then
-		if lsmod 2>/dev/null | grep -q "xt_${_t}\|ipt_${_t}"; then
-			_src="${_src} lsmod"
-		fi
-	fi
-	if have iptables; then
-		if iptables -h 2>/dev/null | grep -qw "$_t"; then
-			_src="${_src} iptables_help"
 		fi
 	fi
 	if [ -n "$_src" ]; then
@@ -999,16 +990,6 @@ for _t in TPROXY MARK CONNMARK REDIRECT; do
 			_src="${_src} proc_modules"
 		fi
 	fi
-	if have lsmod; then
-		if lsmod 2>/dev/null | grep -q "xt_${_t}\|ip6t_${_t}"; then
-			_src="${_src} lsmod"
-		fi
-	fi
-	if have ip6tables; then
-		if ip6tables -h 2>/dev/null | grep -qw "$_t"; then
-			_src="${_src} ip6tables_help"
-		fi
-	fi
 	if [ -n "$_src" ]; then
 		echo "IPv6 ${_t}: PRESENT (${_src} )"
 	else
@@ -1019,7 +1000,7 @@ done
 # ----- IPSET -----
 section "IPSET"
 try "ipset version" ipset version
-try "ipset list -n" ipset list -n
+try_net "ipset list -n" ipset list -n
 
 # ----- TUN -----
 section "TUN"
@@ -1050,7 +1031,8 @@ show_file /proc/sys/fs/file-max
 # ----- MODULES -----
 section "MODULES"
 show_file /proc/modules
-try "lsmod" lsmod
+echo "--- lsmod ---"
+echo "BOUNDED: skipped lsmod; see /proc/modules"
 echo "--- capture-related modules ---"
 if [ -r /proc/modules ]; then
 	grep -i -e tproxy -e redirect -e 'xt_mark' -e connmark -e '^tun' -e ip_set -e xt_set -e nf_tproxy /proc/modules 2>/dev/null | redact || echo "no matching modules"
@@ -1078,13 +1060,11 @@ echo "--- who listens on TCP 53 / UDP 53 ---"
 _dns_tcp="NOT OBSERVED"
 _dns_udp="NOT OBSERVED"
 if have netstat; then
-	try_net "netstat -lnt" netstat -lnt
-	try_net "netstat -lnu" netstat -lnu
+	try_net "netstat -ln" netstat -ln
 	_dns_tcp="SEE_BOUNDED_DUMP"
 	_dns_udp="SEE_BOUNDED_DUMP"
 elif have ss; then
-	try_net "ss -lnt" ss -lnt
-	try_net "ss -lnu" ss -lnu
+	try_net "ss -lntu" ss -lntu
 	_dns_tcp="SEE_BOUNDED_DUMP"
 	_dns_udp="SEE_BOUNDED_DUMP"
 else
@@ -1148,8 +1128,7 @@ if [ "$_xray_pids" -eq 0 ]; then
 fi
 if have xray; then
 	echo "--- xray version ---"
-	xray version 2>&1 | redact
-	xray -version 2>&1 | redact
+	try_net "xray version" xray version
 else
 	echo "--- xray version ---"
 	echo "NOT AVAILABLE: xray"
@@ -1171,8 +1150,8 @@ for _p in /opt/etc/xkeen /opt/sbin/xkeen /opt/bin/xkeen /opt/etc/xray/configs; d
 done
 echo "--- xkeen version/help (read-only flags only) ---"
 if have xkeen; then
-	try "xkeen -v" xkeen -v
-	try "xkeen -h" xkeen -h
+	try_net "xkeen -v" xkeen -v
+	try_net "xkeen -h" xkeen -h
 else
 	echo "NOT AVAILABLE: xkeen"
 fi
@@ -1219,13 +1198,7 @@ for _hookdir in /opt/etc/xkeen /opt/etc/ndm/netfilter.d /opt/etc/ndm/fs.d /opt/e
 	[ "${_hook_stop:-0}" -eq 1 ] && break
 done
 echo "--- xkeen-related listen ports ---"
-if have netstat; then
-	try_net "netstat -lntup" netstat -lntup
-elif have ss; then
-	try_net "ss -lntup" ss -lntup
-else
-	echo "NOT AVAILABLE: netstat/ss"
-fi
+echo "SEE_BOUNDED_DUMP: DNS listen (netstat -ln or ss -lntu)"
 echo "--- XKeen capability summary (observed only) ---"
 _xk_inst="NO"
 if have xkeen || [ -e /opt/sbin/xkeen ] || [ -e /opt/bin/xkeen ] || [ -d /opt/etc/xkeen ]; then
@@ -1282,9 +1255,9 @@ show_file /proc/sys/fs/file-max
 
 # ----- SOCKETS -----
 section "SOCKETS"
-try_net "netstat -lntup" netstat -lntup
-try_net "ss -lntup" ss -lntup
-try_net "netstat -ln" netstat -ln
+echo "--- listen sockets ---"
+echo "SEE_BOUNDED_DUMP: DNS listen (netstat -ln or ss -lntu)"
+echo "BOUNDED: skipped duplicate netstat/ss dumps"
 
 # ----- BASELINE -----
 section "BASELINE"
@@ -1328,19 +1301,12 @@ section "PACKAGE-PROVENANCE"
 echo "read-only opkg status/files/search only; never update/install/remove"
 if have opkg; then
 	for _pkg in ip-full iptables ipset ca-bundle; do
-		echo "--- opkg status ${_pkg} ---"
-		opkg status "$_pkg" 2>&1 | redact || echo "NOT AVAILABLE: ${_pkg}"
+		try_net "opkg status ${_pkg}" opkg status "$_pkg"
 		echo "--- opkg files ${_pkg} ---"
-		opkg files "$_pkg" 2>&1 | redact || echo "NOT AVAILABLE: files ${_pkg}"
+		echo "BOUNDED: skipped opkg files; see status"
 	done
-	for _p in /opt/sbin/ip /opt/sbin/iptables /opt/sbin/ipset /opt/bin/ip /opt/bin/iptables /opt/bin/ipset; do
-		echo "--- opkg search ${_p} ---"
-		if [ -e "$_p" ]; then
-			opkg search "$_p" 2>&1 | redact || echo "NOT AVAILABLE: search ${_p}"
-		else
-			echo "NOT AVAILABLE: ${_p}"
-		fi
-	done
+	echo "--- opkg search userland tools ---"
+	echo "BOUNDED: skipped opkg search of /opt/sbin|/opt/bin paths"
 else
 	echo "NOT AVAILABLE: opkg"
 fi
@@ -1354,7 +1320,7 @@ echo "search roots only: /lib/modules/\$kver /lib/system-modules/\$kver /opt/lib
 for _root in "/lib/modules/${_kver}" "/lib/system-modules/${_kver}" "/opt/lib/modules" "/opt/lib/system-modules/${_kver}"; do
 	echo "--- ${_root} ---"
 	if [ -d "$_root" ]; then
-		ls -l "$_root" 2>&1 | redact | grep -i -e tproxy -e socket -e mark -e connmark -e redirect -e xt_set -e addrtype -e conntrack || echo "(no matching module files in this root)"
+		try_net "ls ${_root}" ls -l "$_root"
 	else
 		echo "NOT AVAILABLE: ${_root}"
 	fi

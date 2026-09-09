@@ -29,6 +29,32 @@ func TestControlDependsUserland(t *testing.T) {
 	}
 }
 
+func TestPackagingControlNoKernelModulesOrNode(t *testing.T) {
+	s := readRepoFile(t, "packaging", "control", "control")
+	if strings.Contains(s, ".ko") {
+		t.Fatal("control must not ship kernel modules")
+	}
+	low := strings.ToLower(s)
+	if strings.Contains(low, "nodejs") || strings.Contains(low, "npm") {
+		t.Fatal("control must not depend on Node runtime")
+	}
+	if !strings.Contains(s, "mipsel-3.4_kn") {
+		t.Fatal("Architecture must be mipsel-3.4_kn")
+	}
+	if !strings.Contains(strings.ToLower(s), "softfloat") {
+		t.Fatal("control must record MIPSLE softfloat")
+	}
+}
+
+func TestResearchLocalAndLogsGitignored(t *testing.T) {
+	s := readRepoFile(t, ".gitignore")
+	for _, want := range []string{".research-local/", "*.log"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("gitignore missing %q", want)
+		}
+	}
+}
+
 func TestProbeSingleInstanceAlreadyRunning(t *testing.T) {
 	s := readProbeScript(t)
 	if !strings.Contains(s, "BTKN_PROBE_LOCKDIR") {
