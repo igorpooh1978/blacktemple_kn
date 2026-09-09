@@ -103,3 +103,9 @@ Feature: Hardware tooling
   Scenario: Live capture client must be one RFC1918 host IPv4
     Given SSH source or BTKN_TEST_CLIENT_IPV4
     Then the address is a /32 LAN host and not the router
+
+  @BTKN-TOOL-025 @P0 @hardware
+  Scenario: Snapshot treats XKeen Hybrid as active without English running
+    Given S05xkeen status reports Hybrid and /opt/sbin/xray owns 1181
+    Then app smoke must not fail expected XKeen ACTIVE
+    And restore still records that XKeen was running

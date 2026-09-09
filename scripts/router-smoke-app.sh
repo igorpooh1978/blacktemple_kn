@@ -123,6 +123,22 @@ btkn_present() {
 	return 1
 }
 
+xkeen_capture_active() {
+	if [ -n "${_init_status:-}" ]; then
+		echo "$_init_status" | grep -qi -e run -e start -e hybrid && return 0
+	fi
+	listen_port tcp 1181 && return 0
+	listen_port udp 1181 && return 0
+	for _d in /proc/[0-9]*; do
+		[ -L "${_d}/exe" ] || continue
+		_p=$(readlink "${_d}/exe" 2>/dev/null)
+		if [ "$_p" = "$FOREIGN_XRAY" ] || [ "$_p" = "${FOREIGN_XRAY} (deleted)" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 cmd_deps() {
 	echo "===== DEPS ====="
 	_miss=0
@@ -150,7 +166,9 @@ cmd_snapshot() {
 	_init_status="NOT AVAILABLE"
 	if [ -x "$XKEEN_INIT" ]; then
 		_init_status=$("$XKEEN_INIT" status 2>&1) || true
-		echo "$_init_status" | grep -qi -e run -e start && _running=1
+	fi
+	if xkeen_capture_active; then
+		_running=1
 	fi
 	{
 		echo "xkeen_init=${XKEEN_INIT}"

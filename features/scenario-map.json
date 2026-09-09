@@ -492,6 +492,11 @@
       "tests": ["src/internal/platform/client_test.go::TestParseSelectedClient"],
       "redProof": "RED: TestParseSelectedClient FAIL before ParseSelectedClient; GREEN after"
     },
+    "BTKN-TOOL-025": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeDetectsXKeenHybridAsActive"],
+      "redProof": "RED: TestAppSmokeDetectsXKeenHybridAsActive FAIL while snapshot only greps run|start; GREEN after Hybrid/1181/foreign xray evidence"
+    },
     "BTKN-LIFE-009": {
       "priority": "P0",
       "tests": ["src/internal/platform/nfcmd_test.go::TestNetfilterReconcileCLIWiresHybrid"],

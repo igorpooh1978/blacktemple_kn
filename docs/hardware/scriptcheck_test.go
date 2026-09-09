@@ -233,6 +233,29 @@ func TestAppSmokeScriptNoFirewallMutation(t *testing.T) {
 	}
 }
 
+func TestAppSmokeDetectsXKeenHybridAsActive(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(s, "FAIL: expected XKeen ACTIVE before mutation") {
+		t.Fatal("snapshot must still refuse to mutate when XKeen is truly absent")
+	}
+	low := strings.ToLower(s)
+	if !strings.Contains(low, "hybrid") {
+		t.Fatal("snapshot must treat Hybrid status as XKeen active")
+	}
+	if !strings.Contains(s, "foreign_xray_pid") {
+		t.Fatal("snapshot must record foreign Xray pid")
+	}
+	if !strings.Contains(s, "listen_1181_tcp") {
+		t.Fatal("snapshot must record 1181")
+	}
+	if strings.Contains(s, `grep -qi -e run -e start && _running=1`) && !strings.Contains(low, "hybrid") {
+		t.Fatal("must not require English run|start as the only liveness signal")
+	}
+	if !strings.Contains(s, "listen_1181_tcp=PRESENT") {
+		t.Fatal("1181 PRESENT must count as XKeen capture still active")
+	}
+}
+
 func TestAppSmokeManagerRestartPath(t *testing.T) {
 	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
 	if !strings.Contains(s, "cmd_restart_manager") {
