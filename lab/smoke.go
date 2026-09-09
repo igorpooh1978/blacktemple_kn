@@ -532,23 +532,20 @@ func sshRun(port int, priv, remote string) (string, error) {
 }
 
 func scpToGuest(port int, priv, local, remote string) error {
-	known := "/dev/null"
-	if runtime.GOOS == "windows" {
-		known = "NUL"
+	in, err := os.Open(local)
+	if err != nil {
+		return err
 	}
-	args := []string{
-		"-i", priv,
-		"-P", strconv.Itoa(port),
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=" + known,
-		"-o", "IdentitiesOnly=yes",
-		local,
-		"root@127.0.0.1:" + remote,
+	defer in.Close()
+	if strings.ContainsAny(remote, "'\n") {
+		return fmt.Errorf("unsafe remote path %q", remote)
 	}
-	cmd := exec.Command("scp", args...)
+	args := append(sshOpts(port, priv), "root@127.0.0.1", "cat > '"+remote+"'")
+	cmd := exec.Command("ssh", args...)
+	cmd.Stdin = in
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("scp %s: %w: %s", filepath.Base(local), err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("copy %s: %w: %s", filepath.Base(local), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
