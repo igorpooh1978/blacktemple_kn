@@ -1,5 +1,9 @@
 #!/bin/sh
-# Stop service if present. Do not flush foreign iptables.
+# Stop owned BTKN capture while the manager binary is still present.
+# Do not flush foreign iptables. Do not stop XKeen.
+if [ -x /opt/blacktemple-kn/bin/blacktempled ]; then
+	/opt/blacktemple-kn/bin/blacktempled netfilter-reconcile stop 2>/dev/null || true
+fi
 if [ -x /opt/etc/init.d/S99blacktemple-kn ]; then
 	/opt/etc/init.d/S99blacktemple-kn stop 2>/dev/null || true
 fi

@@ -270,6 +270,67 @@ function Copy-ScriptViaSshCat {
     }
 }
 
+function Copy-BinaryViaSshCat {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalPath,
+        [Parameter(Mandatory = $true)][string]$RemotePath,
+        [int]$WriteTimeoutMs = 180000
+    )
+    $alivePath = Join-Path $env:TEMP ('btkn-bin-' + [guid]::NewGuid().ToString('N') + '.copying')
+    $wdPath = $alivePath + '.wd.cmd'
+    $proc = $null
+    $watchdog = $null
+    try {
+        $script:SshCopyStderr = ''
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $script:SshExe
+        $psi.Arguments = Format-NativeArgs ($script:SshArgs + @('-l', $script:SshUserName, $RouterAddress, "cat > $RemotePath"))
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $false
+        $psi.RedirectStandardError = $false
+        $psi.CreateNoWindow = $true
+        if ($env:SSH_ASKPASS) { $psi.EnvironmentVariables['SSH_ASKPASS'] = $env:SSH_ASKPASS }
+        if ($env:SSH_ASKPASS_REQUIRE) { $psi.EnvironmentVariables['SSH_ASKPASS_REQUIRE'] = $env:SSH_ASKPASS_REQUIRE }
+        if ($env:DISPLAY) { $psi.EnvironmentVariables['DISPLAY'] = $env:DISPLAY }
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        if (-not $proc.Start()) {
+            return 1
+        }
+        Start-Sleep -Seconds 3
+        [System.IO.File]::WriteAllText($alivePath, '1')
+        $wdBody = "@echo off`r`nping -n 121 127.0.0.1 >nul`r`nif exist `"$alivePath`" taskkill /F /T /PID $($proc.Id)`r`n"
+        [System.IO.File]::WriteAllText($wdPath, $wdBody)
+        $watchdog = Start-Process -FilePath $wdPath -WindowStyle Hidden -PassThru
+        $inBytes = [System.IO.File]::ReadAllBytes($LocalPath)
+        $stdin = $proc.StandardInput.BaseStream
+        $iar = $stdin.BeginWrite($inBytes, 0, $inBytes.Length, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($WriteTimeoutMs)) {
+            Stop-SshCopyProcess -Process $proc
+            return 124
+        }
+        [void]$stdin.EndWrite($iar)
+        try { $stdin.Flush() } catch { }
+        try { $stdin.Close() } catch { }
+        try { $proc.StandardInput.Close() } catch { }
+        if (-not $proc.WaitForExit(180000)) {
+            Stop-SshCopyProcess -Process $proc
+            return 124
+        }
+        return [int]$proc.ExitCode
+    } finally {
+        foreach ($p in @($alivePath, $wdPath)) {
+            if ($p -and (Test-Path -LiteralPath $p)) {
+                Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($watchdog) {
+            cmd /c ("taskkill /F /T /PID " + $watchdog.Id) | Out-Null
+        }
+    }
+}
+
 function Stop-SshCopyProcess {
     param($Process)
     if ($null -eq $Process) {
@@ -477,15 +538,264 @@ function Invoke-LiveRoutingSmoke {
     }
 }
 
+function Send-LiveTcpProbe {
+    try {
+        $req = [System.Net.HttpWebRequest]::Create('http://1.1.1.1/')
+        $req.Timeout = 15000
+        $req.Method = 'GET'
+        $req.AllowAutoRedirect = $false
+        $resp = $req.GetResponse()
+        $code = [int]$resp.StatusCode
+        $resp.Close()
+        Write-Host "LIVE_TCP_REQUEST=ok status=$code"
+        return $true
+    } catch [System.Net.WebException] {
+        $wr = $_.Exception.Response
+        if ($wr) {
+            $code = [int]$wr.StatusCode
+            Write-Host "LIVE_TCP_REQUEST=ok status=$code"
+            return $true
+        }
+        Write-Host "LIVE_TCP_REQUEST=FAIL $($_.Exception.Message)"
+        return $false
+    } catch {
+        Write-Host "LIVE_TCP_REQUEST=FAIL $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Send-LiveUdpProbe {
+    $udp = $null
+    try {
+        $udp = New-Object System.Net.Sockets.UdpClient
+        $bytes = [byte[]](0x00, 0x01, 0x02, 0x03)
+        [void]$udp.Send($bytes, $bytes.Length, '1.1.1.1', 443)
+        Write-Host 'LIVE_UDP_REQUEST=sent 1.1.1.1:443'
+        return $true
+    } catch {
+        Write-Host "LIVE_UDP_REQUEST=FAIL $($_.Exception.Message)"
+        return $false
+    } finally {
+        if ($udp) { $udp.Close() }
+    }
+}
+
+function Invoke-AppRemote {
+    param(
+        [Parameter(Mandatory = $true)][string]$Subcommand,
+        [int]$TimeoutMs = 180000
+    )
+    $remote = '/tmp/btkn-router-smoke-app.sh'
+    $client = ''
+    if ($env:BTKN_TEST_CLIENT_IPV4) {
+        $client = "BTKN_TEST_CLIENT_IPV4=$($env:BTKN_TEST_CLIENT_IPV4)"
+    }
+    $cmd = "BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 $client sh $remote $Subcommand"
+    Write-Host "remote: $Subcommand"
+    $result = Invoke-RemoteSh -RemoteCommand $cmd.Trim() -TimeoutMs $TimeoutMs
+    foreach ($line in @($result.Lines)) {
+        Write-Host $line
+    }
+    return $result
+}
+
+function Invoke-AppLiveRoutingSmoke {
+    Write-Host "router=$RouterAddress user=$SshUser"
+    $sshErr = Initialize-SshSession
+    if ($sshErr) {
+        Write-LiveSmokeNotRun -Reason $sshErr
+        exit 0
+    }
+
+    $localSh = Join-Path $PSScriptRoot 'scripts\router-smoke-app.sh'
+    if (-not (Test-Path -LiteralPath $localSh)) {
+        Write-Host "ERROR: missing $localSh"
+        exit 1
+    }
+
+    $ver = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim()
+    $ipk = Join-Path $PSScriptRoot "out\blacktemple-kn_${ver}_mipsel-3.4_kn.ipk"
+    if (-not (Test-Path -LiteralPath $ipk)) {
+        Write-Host "ERROR: missing IPK $ipk"
+        exit 1
+    }
+
+    $providerLocal = Join-Path $PSScriptRoot '.research-local\xray-provider-transparent.json'
+    $freedomLocal = Join-Path $PSScriptRoot 'src\internal\xray\testdata\golden-freedom-transparent.json'
+    $xrayLocal = $freedomLocal
+    $script:ProviderProfileUsed = $false
+    if (Test-Path -LiteralPath $providerLocal) {
+        $xrayLocal = $providerLocal
+        $script:ProviderProfileUsed = $true
+        Write-Host 'outbound profile: gitignored provider JSON'
+    } else {
+        Write-Host 'outbound profile: harness freedom'
+    }
+
+    Write-Host 'copying app smoke via ssh cat (no SFTP)'
+    $copyCode = Copy-ScriptViaSshCat -LocalPath $localSh -RemotePath '/tmp/btkn-router-smoke-app.sh'
+    if ($copyCode -ne 0) {
+        Write-LiveSmokeNotRun -Reason "ssh cat copy failed (exit $copyCode); connection or credentials"
+        exit 0
+    }
+    $jsonCopy = Copy-ScriptViaSshCat -LocalPath $xrayLocal -RemotePath '/tmp/btkn-xray.json'
+    if ($jsonCopy -ne 0) {
+        Write-Host "ERROR: xray json copy failed (exit $jsonCopy)"
+        exit 1
+    }
+    Write-Host 'copying IPK (binary ssh cat)'
+    $ipkCopy = Copy-BinaryViaSshCat -LocalPath $ipk -RemotePath '/tmp/blacktemple-kn.ipk'
+    if ($ipkCopy -ne 0) {
+        Write-Host "ERROR: IPK copy failed (exit $ipkCopy)"
+        exit 1
+    }
+
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $traceDir = Join-Path $PSScriptRoot '.research-local\hardware'
+    New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
+    $rawPath = Join-Path $traceDir "kn1011-r6i-smoke-$stamp.txt"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    $log = New-Object System.Collections.Generic.List[string]
+    $script:RestoreFailed = $false
+    $snapOk = $false
+    $smokeExit = 1
+
+    Write-Host 'XKeen restore runs in finally (cleanup-btkn, stop-blacktemple, restore-xkeen)'
+    try {
+        $deps = Invoke-AppRemote -Subcommand 'deps'
+        foreach ($line in @($deps.Lines)) { [void]$log.Add($line) }
+        $depText = (($deps.Lines) -join "`n")
+        if ($depText -match 'DEPENDENCY_MISSING' -or $deps.ExitCode -eq 2) {
+            throw 'DEPENDENCY_MISSING'
+        }
+
+        $snap = Invoke-AppRemote -Subcommand 'snapshot'
+        foreach ($line in @($snap.Lines)) { [void]$log.Add($line) }
+        if ($snap.ExitCode -ne 0) {
+            throw "snapshot failed (exit $($snap.ExitCode))"
+        }
+        $snapOk = $true
+
+        Write-Host 'installing BlackTemple IPK only (no XKeen uninstall)'
+        $inst = Invoke-SshCapture -RemoteCommand 'opkg install --force-reinstall /tmp/blacktemple-kn.ipk' -TimeoutMs 180000
+        foreach ($line in @($inst.Lines)) { Write-Host $line; [void]$log.Add($line) }
+        if ($inst.ExitCode -ne 0) {
+            throw "opkg install failed (exit $($inst.ExitCode))"
+        }
+
+        $prep = Invoke-SshCapture -RemoteCommand 'mkdir -p /opt/blacktemple-kn/data/run /opt/blacktemple-kn/logs /opt/blacktemple-kn/run; cp /tmp/btkn-xray.json /opt/blacktemple-kn/data/run/xray.json; chmod 0755 /opt/etc/init.d/S99blacktemple-kn /opt/blacktemple-kn/bin/blacktempled /opt/blacktemple-kn/bin/xray /opt/etc/ndm/netfilter.d/blacktemple-kn.sh 2>/dev/null; /opt/etc/init.d/S99blacktemple-kn start; echo MANAGER_START_DONE'
+        foreach ($line in @($prep.Lines)) { Write-Host $line; [void]$log.Add($line) }
+
+        $client = Invoke-AppRemote -Subcommand 'resolve-client'
+        foreach ($line in @($client.Lines)) { [void]$log.Add($line) }
+        $clientText = (($client.Lines) -join "`n")
+        if ($clientText -match 'CLIENT_REQUIRED' -or $client.ExitCode -eq 3) {
+            Write-Host 'LIVE ROUTING: NOT RUN'
+            throw 'CLIENT_REQUIRED'
+        }
+
+        $xr = Invoke-AppRemote -Subcommand 'start-our-xray'
+        foreach ($line in @($xr.Lines)) { [void]$log.Add($line) }
+        if ($xr.ExitCode -ne 0) { throw "start-our-xray failed (exit $($xr.ExitCode))" }
+
+        $pre = Invoke-AppRemote -Subcommand 'pre-xkeen'
+        foreach ($line in @($pre.Lines)) { [void]$log.Add($line) }
+        if ($pre.ExitCode -ne 0) { throw "pre-xkeen failed (exit $($pre.ExitCode))" }
+
+        $stopXk = Invoke-AppRemote -Subcommand 'stop-xkeen'
+        foreach ($line in @($stopXk.Lines)) { [void]$log.Add($line) }
+        if ($stopXk.ExitCode -ne 0) { throw "stop-xkeen failed (exit $($stopXk.ExitCode))" }
+
+        $apply = Invoke-AppRemote -Subcommand 'apply'
+        foreach ($line in @($apply.Lines)) { [void]$log.Add($line) }
+        if ($apply.ExitCode -ne 0) { throw "apply failed (exit $($apply.ExitCode))" }
+
+        Write-Host 'LIVE TCP from selected client host'
+        [void](Send-LiveTcpProbe)
+        Write-Host 'LIVE UDP from selected client host (public 1.1.1.1:443, not DNS to router)'
+        [void](Send-LiveUdpProbe)
+        $cnt = Invoke-AppRemote -Subcommand 'counters'
+        foreach ($line in @($cnt.Lines)) { [void]$log.Add($line) }
+
+        $rstMgr = Invoke-AppRemote -Subcommand 'restart-manager'
+        foreach ($line in @($rstMgr.Lines)) { [void]$log.Add($line) }
+        if ($rstMgr.ExitCode -ne 0) { throw "restart-manager failed (exit $($rstMgr.ExitCode))" }
+
+        $fail = Invoke-AppRemote -Subcommand 'fail-open'
+        foreach ($line in @($fail.Lines)) { [void]$log.Add($line) }
+        if ($fail.ExitCode -ne 0) { throw "fail-open failed (exit $($fail.ExitCode))" }
+
+        Write-Host 'DIRECT TCP after fail-open'
+        [void](Send-LiveTcpProbe)
+        $dns = Invoke-AppRemote -Subcommand 'dns'
+        foreach ($line in @($dns.Lines)) { [void]$log.Add($line) }
+
+        Write-Host 'LIVE ROUTING SMOKE: RUN (app path; not a TPROXY SUPPORTED claim)'
+        $smokeExit = 0
+    } catch {
+        Write-Host "LIVE ROUTING SMOKE ERROR: $($_.Exception.Message)"
+        [void]$log.Add("LIVE ROUTING SMOKE ERROR: $($_.Exception.Message)")
+        if ($_.Exception.Message -eq 'CLIENT_REQUIRED') {
+            $smokeExit = 0
+        } else {
+            $smokeExit = 1
+        }
+    } finally {
+        Write-Host 'finally: remove BTKN, stop test BlackTemple, restore XKeen, verify'
+        try {
+            $cleanup = Invoke-AppRemote -Subcommand 'cleanup-btkn'
+            foreach ($line in @($cleanup.Lines)) { [void]$log.Add($line) }
+            $stopBt = Invoke-AppRemote -Subcommand 'stop-blacktemple'
+            foreach ($line in @($stopBt.Lines)) { [void]$log.Add($line) }
+            if ($snapOk) {
+                $restore = Invoke-AppRemote -Subcommand 'restore-xkeen'
+                foreach ($line in @($restore.Lines)) { [void]$log.Add($line) }
+                $joined = (($restore.Lines) -join "`n")
+                if ($restore.ExitCode -ne 0 -or $joined -match 'RESTORE_XKEEN: FAIL') {
+                    Write-Host 'RESTORE_XKEEN: FAIL'
+                    [void]$log.Add('RESTORE_XKEEN: FAIL')
+                    $script:RestoreFailed = $true
+                } else {
+                    Write-Host 'RESTORE_XKEEN: PASS'
+                }
+            } else {
+                Write-Host 'finally: skip XKeen restore (snapshot did not complete)'
+            }
+            $after = Invoke-AppRemote -Subcommand 'verify-restore'
+            foreach ($line in @($after.Lines)) { [void]$log.Add($line) }
+        } catch {
+            Write-Host "finally restore error: $($_.Exception.Message)"
+            Write-Host 'RESTORE_XKEEN: FAIL'
+            $script:RestoreFailed = $true
+        }
+        [System.IO.File]::WriteAllLines($rawPath, @($log), $utf8NoBom)
+        Write-Host "RAW TRACE: $rawPath (gitignored)"
+        if ($script:ProviderProfileUsed) {
+            Write-Host 'PROVIDER VPN TUNNEL = USED (gitignored profile; verification is hardware evidence)'
+        } else {
+            Write-Host 'ROUTING PATH = attempted'
+            Write-Host 'PROVIDER VPN TUNNEL = NOT VERIFIED'
+        }
+        Write-Host 'DNS = KEENETIC_DIRECT'
+        Write-Host 'DNS_LEAK_FREE = NOT CLAIMED'
+    }
+    if ($script:RestoreFailed) {
+        exit 1
+    }
+    exit $smokeExit
+}
+
 Write-Host "router-smoke.ps1: KN-1011 hardware gate mode=$Mode"
 
 if ($Mode -eq 'Smoke') {
-    Write-LiveSmokeNotRun -Reason 'APP_SMOKE_NOT_WIRED'
-    Write-Host 'KERNEL_MUTATION_HARNESS: not executed from Mode Smoke'
-    Write-Host 'blackTempleHardwareSmoke: NOT APPLICABLE'
-    Write-Host 'Actual app smoke (blacktempled + port 11820 + D engine) is not wired.'
-    Write-Host 'Dual gates BTKN_ALLOW_ROUTING_MUTATION / BTKN_ALLOW_XKEEN_STOP remain; they were not set/used this iteration.'
-    exit 0
+    $allowMut = $env:BTKN_ALLOW_ROUTING_MUTATION
+    $allowStop = $env:BTKN_ALLOW_XKEEN_STOP
+    if ($allowMut -ne '1' -or $allowStop -ne '1') {
+        Write-LiveSmokeNotRun -Reason 'requires BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1'
+        exit 0
+    }
+    Invoke-AppLiveRoutingSmoke
+    exit $LASTEXITCODE
 }
 
 # Mode Probe

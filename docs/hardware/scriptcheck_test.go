@@ -180,7 +180,8 @@ func TestProbeXkeenSafeFlagsOnly(t *testing.T) {
 func TestSmokeHarnessRequiresMutationGates(t *testing.T) {
 	ps1 := readRepoFile(t, "router-smoke.ps1")
 	sh := readRepoFile(t, "scripts", "router-smoke-routing.sh")
-	combined := ps1 + "\n" + sh
+	app := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	combined := ps1 + "\n" + sh + "\n" + app
 	if !strings.Contains(combined, "BTKN_ALLOW_ROUTING_MUTATION") {
 		t.Fatal("harness must name BTKN_ALLOW_ROUTING_MUTATION")
 	}
@@ -190,11 +191,124 @@ func TestSmokeHarnessRequiresMutationGates(t *testing.T) {
 	if !strings.Contains(combined, "LIVE ROUTING SMOKE: NOT RUN") {
 		t.Fatal("harness must have LIVE ROUTING SMOKE: NOT RUN path")
 	}
-	if !strings.Contains(ps1, `$allowMut -ne '1'`) && !strings.Contains(ps1, "BTKN_ALLOW_ROUTING_MUTATION") {
-		t.Fatal("PowerShell gate must check mutation env")
+	if !strings.Contains(ps1, `$allowMut -ne '1'`) {
+		t.Fatal("PowerShell gate must check $allowMut -ne '1'")
 	}
 	if !strings.Contains(sh, `BTKN_ALLOW_ROUTING_MUTATION`) || !strings.Contains(sh, `BTKN_ALLOW_XKEEN_STOP`) {
 		t.Fatal("remote smoke script must re-check both gates")
+	}
+	if !strings.Contains(app, `BTKN_ALLOW_ROUTING_MUTATION`) || !strings.Contains(app, `BTKN_ALLOW_XKEEN_STOP`) {
+		t.Fatal("app smoke script must re-check both gates")
+	}
+}
+
+func TestXKeenRestoreFailureFailsGate(t *testing.T) {
+	ps1 := readRepoFile(t, "router-smoke.ps1")
+	sh := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(sh, "RESTORE_XKEEN: FAIL") {
+		t.Fatal("app smoke must print RESTORE_XKEEN: FAIL")
+	}
+	if !strings.Contains(ps1, "RESTORE_XKEEN") {
+		t.Fatal("PowerShell must surface RESTORE_XKEEN failure")
+	}
+}
+
+func TestAppSmokeScriptNoFirewallMutation(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	forbidden := []*regexp.Regexp{
+		regexp.MustCompile(`iptables[^\n]*[[:space:]]-[ADI]([[:space:]]|$)`),
+		regexp.MustCompile(`ip[[:space:]]+rule[[:space:]]+(add|del)\b`),
+		regexp.MustCompile(`ip[[:space:]]+route[[:space:]]+(add|del)\b`),
+	}
+	for _, re := range forbidden {
+		if loc := re.FindStringIndex(s); loc != nil {
+			t.Errorf("app smoke must not mutate firewall directly: %s", re.String())
+		}
+	}
+	if !strings.Contains(s, "netfilter-reconcile") {
+		t.Fatal("app smoke must call blacktempled netfilter-reconcile")
+	}
+	if strings.Contains(s, "REDIRECT --to-ports 1181") {
+		t.Fatal("app smoke must not install XKeen port 1181")
+	}
+}
+
+func TestAppSmokeDetectsXKeenHybridAsActive(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(s, "FAIL: expected XKeen ACTIVE before mutation") {
+		t.Fatal("snapshot must still refuse to mutate when XKeen is truly absent")
+	}
+	low := strings.ToLower(s)
+	if !strings.Contains(low, "hybrid") {
+		t.Fatal("snapshot must treat Hybrid status as XKeen active")
+	}
+	if !strings.Contains(s, "foreign_xray_pid") {
+		t.Fatal("snapshot must record foreign Xray pid")
+	}
+	if !strings.Contains(s, "listen_1181_tcp") {
+		t.Fatal("snapshot must record 1181")
+	}
+	if strings.Contains(s, `grep -qi -e run -e start && _running=1`) && !strings.Contains(low, "hybrid") {
+		t.Fatal("must not require English run|start as the only liveness signal")
+	}
+	if !strings.Contains(s, "listen_1181_tcp=PRESENT") {
+		t.Fatal("1181 PRESENT must count as XKeen capture still active")
+	}
+}
+
+func TestAppSmokeManagerRestartPath(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(s, "cmd_restart_manager") {
+		t.Fatal("app smoke must implement manager restart")
+	}
+	if !strings.Contains(s, "netfilter-reconcile") {
+		t.Fatal("restart path must go through netfilter-reconcile")
+	}
+	if !strings.Contains(s, "duplicate") && !strings.Contains(s, "nat_prerouting_btkn_jumps") {
+		t.Fatal("restart path must check for duplicate jumps")
+	}
+}
+
+func TestAppSmokeFailOpenPath(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(s, "cmd_fail_open") {
+		t.Fatal("app smoke must implement fail-open")
+	}
+	idxStop := strings.Index(s, `xray-stop`)
+	idxFail := strings.Index(s, "cmd_fail_open")
+	if idxStop < 0 || idxFail < 0 {
+		t.Fatal("fail-open must stop OUR Xray through manager CLI")
+	}
+	if !strings.Contains(s, "FAIL_OPEN") {
+		t.Fatal("fail-open must report FAIL_OPEN")
+	}
+}
+
+func TestAppSmokeDoesNotMutateDNS(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if strings.Contains(s, "xkeen -dns") || strings.Contains(s, "ndnproxy -") {
+		t.Fatal("app smoke must not mutate Keenetic DNS")
+	}
+	if !strings.Contains(s, "DNS=KEENETIC_DIRECT") {
+		t.Fatal("app smoke must report DNS=KEENETIC_DIRECT")
+	}
+	if !strings.Contains(s, "DNS_LEAK_FREE=NOT CLAIMED") {
+		t.Fatal("app smoke must not claim DNS leak-free")
+	}
+}
+
+func TestDaemonSourcesNeverStopXKeen(t *testing.T) {
+	files := [][]string{
+		{"src", "cmd", "blacktempled", "main.go"},
+		{"src", "internal", "platform", "nfcmd.go"},
+		{"packaging", "keenetic", "netfilter.d", "blacktemple-kn.sh"},
+		{"packaging", "init", "S99blacktemple-kn"},
+	}
+	for _, rel := range files {
+		s := readRepoFile(t, rel...)
+		if strings.Contains(s, "S05xkeen") || strings.Contains(s, "xkeen stop") {
+			t.Errorf("%s must not stop XKeen", filepath.Join(rel...))
+		}
 	}
 }
 
@@ -223,6 +337,7 @@ func TestCredentialsNeverArgvOrLog(t *testing.T) {
 		{"router-smoke.ps1"},
 		{"scripts", "router-probe.sh"},
 		{"scripts", "router-smoke-routing.sh"},
+		{"scripts", "router-smoke-app.sh"},
 	}
 	for _, rel := range files {
 		s := readRepoFile(t, rel...)
@@ -274,6 +389,7 @@ func TestNoIptablesGlobalFlush(t *testing.T) {
 		{"router-smoke.ps1"},
 		{"scripts", "router-probe.sh"},
 		{"scripts", "router-smoke-routing.sh"},
+		{"scripts", "router-smoke-app.sh"},
 	}
 	bad := regexp.MustCompile(`(?m)ip6?tables(?:[[:space:]]+-t[[:space:]]+\S+)?[[:space:]]+-F[[:space:]]*$`)
 	for _, rel := range files {
@@ -288,23 +404,27 @@ func TestNoIptablesGlobalFlush(t *testing.T) {
 }
 
 func TestSmokeDoesNotChangeIPv6(t *testing.T) {
-	sh := readRepoFile(t, "scripts", "router-smoke-routing.sh")
-	mut := regexp.MustCompile(`ip6tables[^\n]*[[:space:]]-[ADIFX]([[:space:]]|$)`)
-	if loc := mut.FindStringIndex(sh); loc != nil {
-		t.Errorf("smoke must not mutate ip6tables: %q", snippet(sh, loc[0]))
-	}
-	if strings.Contains(sh, "xkeen -ipv6") {
-		t.Error("smoke must not run xkeen -ipv6")
+	for _, name := range []string{"router-smoke-routing.sh", "router-smoke-app.sh"} {
+		sh := readRepoFile(t, "scripts", name)
+		mut := regexp.MustCompile(`ip6tables[^\n]*[[:space:]]-[ADIFX]([[:space:]]|$)`)
+		if loc := mut.FindStringIndex(sh); loc != nil {
+			t.Errorf("%s must not mutate ip6tables: %q", name, snippet(sh, loc[0]))
+		}
+		if strings.Contains(sh, "xkeen -ipv6") {
+			t.Errorf("%s must not run xkeen -ipv6", name)
+		}
 	}
 }
 
 func TestSmokeRoutingScriptGatedAndLF(t *testing.T) {
-	s := readRepoFile(t, "scripts", "router-smoke-routing.sh")
-	if !strings.HasPrefix(s, "#!/bin/sh") {
-		t.Fatalf("expected #!/bin/sh, got %q", firstLine(s))
-	}
-	if strings.Contains(s, "\r") {
-		t.Fatal("router-smoke-routing.sh must be LF-only (no CR)")
+	for _, name := range []string{"router-smoke-routing.sh", "router-smoke-app.sh"} {
+		s := readRepoFile(t, "scripts", name)
+		if !strings.HasPrefix(s, "#!/bin/sh") {
+			t.Fatalf("%s expected #!/bin/sh, got %q", name, firstLine(s))
+		}
+		if strings.Contains(s, "\r") {
+			t.Fatalf("%s must be LF-only (no CR)", name)
+		}
 	}
 }
 
@@ -315,6 +435,7 @@ func TestHardwareDocsNeverClaimTPROXYSupported(t *testing.T) {
 		{"router-smoke.ps1"},
 		{"scripts", "router-probe.sh"},
 		{"scripts", "router-smoke-routing.sh"},
+		{"scripts", "router-smoke-app.sh"},
 	}
 	claim := regexp.MustCompile(`(?i)TPROXY[[:space:]]*[:=][[:space:]]*SUPPORTED`)
 	for _, rel := range files {

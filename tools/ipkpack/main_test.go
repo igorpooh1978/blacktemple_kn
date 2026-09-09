@@ -9,10 +9,37 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestEntwareIpkIsGzipTar(t *testing.T) {
+	root := t.TempDir()
+	control, data := makePkgDirs(t, root, "mipsel-3.4_kn")
+	out := filepath.Join(root, "pkg.ipk")
+	if err := pack(data, control, out, 0); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 2 || raw[0] != 0x1f || raw[1] != 0x8b {
+		t.Fatalf("Entware opkg requires gzip outer, magic=%q", raw[:min(8, len(raw))])
+	}
+	if bytes.HasPrefix(raw, []byte("!<arch>\n")) {
+		t.Fatal("raw ar is rejected by Entware opkg as malformed")
+	}
+	members := readOuterIpk(t, raw)
+	for _, name := range []string{"./debian-binary", "./data.tar.gz", "./control.tar.gz"} {
+		if len(members[name]) == 0 {
+			t.Fatalf("missing %s (have %v)", name, outerKeys(members))
+		}
+	}
+	if string(members["./debian-binary"]) != "2.0\n" {
+		t.Fatalf("debian-binary=%q", members["./debian-binary"])
+	}
+}
 
 func TestPackRoundTrip(t *testing.T) {
 	root := t.TempDir()
@@ -38,17 +65,12 @@ func TestPackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(b), "!<arch>\n") {
-		t.Fatalf("not ar: %q", b[:8])
+	if len(b) < 2 || b[0] != 0x1f || b[1] != 0x8b {
+		t.Fatalf("not gzip: %q", b[:min(8, len(b))])
 	}
-	if !strings.Contains(string(b), "debian-binary") {
-		t.Fatal("missing debian-binary")
-	}
-	if !strings.Contains(string(b), "control.tar.gz") {
-		t.Fatal("missing control.tar.gz")
-	}
-	if !strings.Contains(string(b), "data.tar.gz") {
-		t.Fatal("missing data.tar.gz")
+	members := readOuterIpk(t, b)
+	if len(members["./debian-binary"]) == 0 || len(members["./control.tar.gz"]) == 0 || len(members["./data.tar.gz"]) == 0 {
+		t.Fatalf("missing outer members: %v", outerKeys(members))
 	}
 }
 
@@ -70,13 +92,16 @@ func TestArchitectureFieldPacked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	members := readAr(t, raw)
-	ctrlTar := members["control.tar.gz"]
+	members := readOuterIpk(t, raw)
+	ctrlTar := members["./control.tar.gz"]
 	if len(ctrlTar) == 0 {
 		t.Fatal("missing control.tar.gz member")
 	}
 	files := tarGzMap(t, ctrlTar)
-	ctrl, ok := files["control"]
+	ctrl, ok := files["./control"]
+	if !ok {
+		ctrl, ok = files["control"]
+	}
 	if !ok {
 		t.Fatalf("control file missing in tar, have %v", keys(files))
 	}
@@ -118,14 +143,39 @@ func TestFileModesShebangELFAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	members := readAr(t, raw)
-	dataFiles := tarGzMap(t, members["data.tar.gz"])
-	ctrlFiles := tarGzMap(t, members["control.tar.gz"])
+	members := readOuterIpk(t, raw)
+	dataFiles := tarGzMap(t, members["./data.tar.gz"])
+	ctrlFiles := tarGzMap(t, members["./control.tar.gz"])
 
-	assertMode(t, dataFiles, "opt/blacktemple-kn/bin/blacktempled", 0o755)
-	assertMode(t, dataFiles, "opt/etc/init.d/S99blacktemple-kn", 0o755)
-	assertMode(t, dataFiles, "opt/blacktemple-kn/config/notes.txt", 0o600)
-	assertMode(t, ctrlFiles, "postinst", 0o755)
+	assertMode(t, dataFiles, "./opt/blacktemple-kn/bin/blacktempled", 0o755)
+	assertMode(t, dataFiles, "./opt/etc/init.d/S99blacktemple-kn", 0o755)
+	assertMode(t, dataFiles, "./opt/blacktemple-kn/config/notes.txt", 0o600)
+	assertMode(t, ctrlFiles, "./postinst", 0o755)
+}
+
+func TestShebangCRLFNormalizedInIpk(t *testing.T) {
+	root := t.TempDir()
+	control, data := makePkgDirs(t, root, "mipsel-3.4_kn")
+	crlf := []byte("#!/bin/sh\r\nexit 0\r\n")
+	if err := os.WriteFile(filepath.Join(control, "prerm"), crlf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "pkg.ipk")
+	if err := pack(data, control, out, 0); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrlFiles := tarGzMap(t, readOuterIpk(t, raw)["./control.tar.gz"])
+	body := ctrlFiles["./prerm"].body
+	if bytes.Contains(body, []byte{'\r'}) {
+		t.Fatalf("packed shebang still has CR: %q", body[:min(32, len(body))])
+	}
+	if !bytes.HasPrefix(body, []byte("#!/bin/sh\n")) {
+		t.Fatalf("packed shebang=%q", body[:min(16, len(body))])
+	}
 }
 
 func TestChecksumStableSameEpoch(t *testing.T) {
@@ -237,29 +287,42 @@ func keys(m map[string]tarEnt) []string {
 	return out
 }
 
-func readAr(t *testing.T, raw []byte) map[string][]byte {
+func readOuterIpk(t *testing.T, raw []byte) map[string][]byte {
 	t.Helper()
-	if !strings.HasPrefix(string(raw), "!<arch>\n") {
-		t.Fatal("missing ar magic")
+	if len(raw) < 2 || raw[0] != 0x1f || raw[1] != 0x8b {
+		t.Fatal("missing gzip magic")
 	}
-	off := 8
+	gr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
 	out := map[string][]byte{}
-	for off+60 <= len(raw) {
-		hdr := raw[off : off+60]
-		off += 60
-		name := strings.TrimSpace(string(hdr[0:16]))
-		size, err := strconv.Atoi(strings.TrimSpace(string(hdr[48:58])))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if off+size > len(raw) {
-			t.Fatal("truncated ar member")
+		if hdr.Typeflag != tar.TypeReg {
+			continue
 		}
-		out[name] = append([]byte(nil), raw[off:off+size]...)
-		off += size
-		if size%2 == 1 {
-			off++
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
 		}
+		out[hdr.Name] = body
+	}
+	return out
+}
+
+func outerKeys(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	return out
 }

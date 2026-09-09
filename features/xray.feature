@@ -35,3 +35,15 @@ Feature: Xray configuration
     Given a generated config containing a UUID
     When Redact runs
     Then the secret is not present in diagnostics
+
+  @BTKN-XRAY-007 @P0 @xray
+  Scenario: Foreign XKeen Xray is never OUR Xray
+    Given /opt/sbin/xray
+    Then it is not accepted as /opt/blacktemple-kn/bin/xray
+    And it must not own transparent port 11820
+
+  @BTKN-XRAY-008 @P0 @xray
+  Scenario: Detached OUR Xray keeps stdio off the parent CLI
+    Given blacktempled xray-start with Detach
+    Then child stdout and stderr are OS devnull files
+    And they are not the parent io.Discard pipe

@@ -153,6 +153,57 @@ func TestValidateTransparentConfigLive(t *testing.T) {
 	}
 }
 
+func TestValidateFreedomTransparentLive(t *testing.T) {
+	exe := lookupXray(t)
+	r := &Runner{Executable: exe}
+	raw, err := os.ReadFile(filepath.Join("testdata", "golden-freedom-transparent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	s := string(raw)
+	s = strings.ReplaceAll(s, "/opt/blacktemple-kn/logs/xray-access.log", filepath.ToSlash(filepath.Join(tmp, "access.log")))
+	s = strings.ReplaceAll(s, "/opt/blacktemple-kn/logs/xray-error.log", filepath.ToSlash(filepath.Join(tmp, "error.log")))
+	path := filepath.Join(tmp, "freedom.json")
+	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := r.ValidateConfig(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFreedomTransparentGoldenShape(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "golden-freedom-transparent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "1181") {
+		t.Fatal("freedom golden must not use XKeen port 1181")
+	}
+	if !strings.Contains(s, `"port":11820`) {
+		t.Fatal("transparent port must be 11820")
+	}
+	if !strings.Contains(s, `"protocol":"freedom"`) {
+		t.Fatal("R6-I harness outbound is freedom")
+	}
+	if !strings.Contains(s, `"tproxy":"tproxy"`) {
+		t.Fatal("UDP inbound must enable tproxy")
+	}
+	idxTCP := strings.Index(s, `"tag":"redirect-in"`)
+	idxUDP := strings.Index(s, `"tag":"tproxy-in"`)
+	if idxTCP < 0 || idxUDP < 0 || idxUDP < idxTCP {
+		t.Fatal("expected redirect-in then tproxy-in")
+	}
+	mid := s[idxTCP:idxUDP]
+	if strings.Contains(mid, "tproxy") {
+		t.Fatal("TCP inbound must not set tproxy sockopt")
+	}
+}
+
 func TestValidateMalformedConfigLive(t *testing.T) {
 	exe := lookupXray(t)
 	r := &Runner{Executable: exe}
@@ -168,5 +219,31 @@ func TestValidateMalformedConfigLive(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), fixtureUUID) {
 		t.Fatalf("error leaked uuid: %v", err)
+	}
+}
+
+func TestDetachStdioUsesOSDevNull(t *testing.T) {
+	cmd := exec.Command("true")
+	f, err := attachDetachedStdio(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Cleanup(func() { _ = f.Close() })
+	}
+	out, ok := cmd.Stdout.(*os.File)
+	if !ok {
+		t.Fatalf("detached stdout type %T; parent io.Discard dies with xray-start", cmd.Stdout)
+	}
+	name := strings.ToLower(out.Name())
+	if name != os.DevNull && name != "nul" {
+		t.Fatalf("detached stdout %q want OS devnull", out.Name())
+	}
+	errf, ok := cmd.Stderr.(*os.File)
+	if !ok {
+		t.Fatalf("detached stderr type %T", cmd.Stderr)
+	}
+	if strings.ToLower(errf.Name()) != name && strings.ToLower(errf.Name()) != os.DevNull && strings.ToLower(errf.Name()) != "nul" {
+		t.Fatalf("detached stderr %q", errf.Name())
 	}
 }

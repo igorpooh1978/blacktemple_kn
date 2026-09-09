@@ -103,3 +103,16 @@ Feature: Routing capture
   Scenario: Partial Apply joins cleanup errors
     Given Apply failure plus Remove failure
     Then both errors are reported
+
+  @BTKN-ROUT-018 @P0 @routing
+  Scenario: Manager desired-present Apply refuses while XKeen is active
+    Given XKeen capture still installed
+    When netfilter-reconcile desired-present runs
+    Then ErrExistingCaptureEngine is returned
+    And no BTKN install mutations are committed
+
+  @BTKN-ROUT-019 @P0 @routing
+  Scenario: Client DNS stays on the Keenetic resolver
+    Given live capture
+    Then DNS :53 and ndnproxy are not mutated by BlackTemple
+    And DNS leak-free is not claimed

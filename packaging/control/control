@@ -1,7 +1,6 @@
 Package: blacktemple-kn
 Version: 0.1.0-dev
 Depends: ip-full, iptables, ipset
- 
 Section: net
 Architecture: mipsel-3.4_kn
 Priority: optional
