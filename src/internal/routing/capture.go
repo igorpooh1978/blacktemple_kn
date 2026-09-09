@@ -29,6 +29,16 @@ const (
 	IPv6CaptureUnverified = "UNVERIFIED"
 )
 
+// XKeenPresence is the live vs leftover XKeen classification. Apply is refused
+// for LIVE and RESIDUAL_CAPTURE. BlackTemple never deletes XKeen objects.
+type XKeenPresence string
+
+const (
+	XKeenAbsent   XKeenPresence = "XKEEN_ABSENT"
+	XKeenLive     XKeenPresence = "XKEEN_LIVE"
+	XKeenResidual XKeenPresence = "XKEEN_RESIDUAL_CAPTURE"
+)
+
 var (
 	ErrClientRequired        = errors.New("routing: selected client IPv4 required")
 	ErrExistingCaptureEngine = errors.New("routing: existing capture engine")
@@ -105,6 +115,7 @@ type PreflightReport struct {
 	OK          bool
 	Collisions  []Collision
 	XKeenActive bool
+	XKeenState  XKeenPresence
 	IPv6Capture string
 }
 

@@ -2,8 +2,8 @@
 # Gated KN-1011 BlackTemple APP smoke (production path).
 # Production constants: 11820 / 0x42544b4e / table 4254 / BTKN_* / btkn_*.
 # Does not mutate iptables/ip rule/ip route: blacktempled netfilter-reconcile owns that.
-# Production daemon never stops XKeen. This harness may, only with both gates.
-# Without both gates: LIVE ROUTING SMOKE: NOT RUN and exit 0.
+# Production daemon never stops XKeen. This harness may, only with all three gates.
+# Without all three gates: LIVE ROUTING SMOKE: NOT RUN and exit 0.
 # Does not claim TPROXY SUPPORTED, KN-1011 SUPPORTED, or routing DONE.
 
 SNAP_FILE="${BTKN_SMOKE_SNAP:-/tmp/btkn-r6i-smoke-snapshot.txt}"
@@ -19,10 +19,17 @@ BTKN_MARK="0x42544b4e"
 BTKN_TABLE="4254"
 BTKN_PORT="11820"
 
+require_rescue() {
+	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.current ]; then
+		echo "FAIL: rescue watchdog not armed"
+		return 1
+	fi
+}
+
 require_gates() {
-	if [ "${BTKN_ALLOW_ROUTING_MUTATION}" != "1" ] || [ "${BTKN_ALLOW_XKEEN_STOP}" != "1" ]; then
+	if [ "${BTKN_ALLOW_ROUTING_MUTATION}" != "1" ] || [ "${BTKN_ALLOW_XKEEN_STOP}" != "1" ] || [ "${BTKN_PRODUCTION_ROUTER_MUTATION_ACK}" != "I_ACCEPT_NETWORK_LOSS" ]; then
 		echo "LIVE ROUTING SMOKE: NOT RUN"
-		echo "reason: requires BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1"
+		echo "reason: requires BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 BTKN_PRODUCTION_ROUTER_MUTATION_ACK=I_ACCEPT_NETWORK_LOSS"
 		exit 0
 	fi
 }
@@ -118,8 +125,8 @@ listen_port() {
 
 btkn_present() {
 	have iptables || return 1
-	iptables -t nat -S 2>/dev/null | grep -q BTKN_ && return 0
-	iptables -t mangle -S 2>/dev/null | grep -q BTKN_ && return 0
+	iptables -t nat -L BTKN_PRE -n >/dev/null 2>&1 && return 0
+	iptables -t mangle -L BTKN_PRE -n >/dev/null 2>&1 && return 0
 	return 1
 }
 
@@ -234,9 +241,10 @@ cmd_resolve_client() {
 	echo "===== RESOLVE CLIENT ====="
 	CLIENT="${BTKN_TEST_CLIENT_IPV4:-}"
 	_src="BTKN_TEST_CLIENT_IPV4"
-	if [ -z "$CLIENT" ] && [ -n "$SSH_CONNECTION" ]; then
-		CLIENT=$(echo "$SSH_CONNECTION" | awk '{print $1}')
-		_src="SSH_CONNECTION"
+	CTRL=""
+	if [ -n "$SSH_CONNECTION" ]; then
+		CTRL=$(echo "$SSH_CONNECTION" | awk '{print $1}')
+		echo "controller_ssh_src=${CTRL}"
 	fi
 	if [ -z "$CLIENT" ]; then
 		echo "CLIENT_REQUIRED"
@@ -267,6 +275,12 @@ cmd_resolve_client() {
 	if router_has_ip "$CLIENT"; then
 		echo "CLIENT_REQUIRED"
 		echo "reason: client equals router address"
+		echo "LIVE ROUTING: NOT RUN"
+		return 3
+	fi
+	if [ -n "$CTRL" ] && [ "$CLIENT" = "$CTRL" ] && [ "${BTKN_ALLOW_CONTROLLER_CLIENT}" != "1" ]; then
+		echo "CLIENT_REQUIRED"
+		echo "reason: controller client not allowed without BTKN_ALLOW_CONTROLLER_CLIENT=1"
 		echo "LIVE ROUTING: NOT RUN"
 		return 3
 	fi
@@ -339,8 +353,8 @@ cmd_start_our_xray() {
 
 cmd_pre_xkeen() {
 	echo "===== PRE-XKEEN APPLY REFUSAL ====="
-	_before_nat=$(iptables -t nat -S 2>/dev/null | grep -c BTKN_ || true)
-	_before_mangle=$(iptables -t mangle -S 2>/dev/null | grep -c BTKN_ || true)
+	_before=0
+	btkn_present && _before=1
 	_rc=0
 	_out=$("$BIN" netfilter-reconcile 2>&1) || _rc=$?
 	echo "$_out"
@@ -349,9 +363,9 @@ cmd_pre_xkeen() {
 		echo "FAIL: expected ErrExistingCaptureEngine"
 		return 1
 	fi
-	_after_nat=$(iptables -t nat -S 2>/dev/null | grep -c BTKN_ || true)
-	_after_mangle=$(iptables -t mangle -S 2>/dev/null | grep -c BTKN_ || true)
-	if [ "${_before_nat}" != "${_after_nat}" ] || [ "${_before_mangle}" != "${_after_mangle}" ]; then
+	_after=0
+	btkn_present && _after=1
+	if [ "${_before}" != "${_after}" ]; then
 		echo "FAIL: BTKN mutated during XKeen-active Apply refusal"
 		return 1
 	fi
@@ -364,6 +378,9 @@ cmd_pre_xkeen() {
 
 cmd_stop_xkeen() {
 	echo "===== STOP XKEEN (harness gates only) ====="
+	if ! require_rescue; then
+		return 1
+	fi
 	if [ ! -x "$XKEEN_INIT" ]; then
 		echo "FAIL: missing ${XKEEN_INIT}"
 		return 1
@@ -384,6 +401,9 @@ cmd_stop_xkeen() {
 
 cmd_apply() {
 	echo "===== APPLY blacktempled Reconcile ====="
+	if ! require_rescue; then
+		return 1
+	fi
 	if ! "$BIN" netfilter-reconcile 2>&1; then
 		echo "FAIL: netfilter-reconcile Apply"
 		return 1
@@ -393,28 +413,29 @@ cmd_apply() {
 
 cmd_verify_capture() {
 	echo "===== VERIFY CAPTURE ====="
-	_nat=$(iptables -t nat -S 2>/dev/null)
-	_mangle=$(iptables -t mangle -S 2>/dev/null)
+	_nat=$(iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null)
+	_mangle=$(iptables -t mangle -L PREROUTING -n --line-numbers 2>/dev/null)
 	echo "$_nat" | grep BTKN_ || true
 	echo "$_mangle" | grep BTKN_ || true
-	echo "$_nat" | grep -q 'PREROUTING -j BTKN_PRE' || { echo "FAIL: nat PREROUTING -> BTKN_PRE"; return 1; }
-	echo "$_nat" | grep -q 'BTKN_PRE' || { echo "FAIL: BTKN_PRE missing"; return 1; }
-	echo "$_nat" | grep -q 'BTKN_TCP' || { echo "FAIL: BTKN_TCP missing"; return 1; }
-	echo "$_nat" | grep -q 'REDIRECT --to-ports 11820' || { echo "FAIL: TCP REDIRECT 11820"; return 1; }
-	echo "$_mangle" | grep -q 'PREROUTING -j BTKN_PRE' || { echo "FAIL: mangle PREROUTING -> BTKN_PRE"; return 1; }
-	echo "$_mangle" | grep -q 'CONNMARK --restore-mark' || { echo "FAIL: UDP CONNMARK restore"; return 1; }
-	echo "$_mangle" | grep -q 'TPROXY' || { echo "FAIL: UDP TPROXY"; return 1; }
-	echo "$_mangle" | grep -q '11820' || { echo "FAIL: TPROXY port 11820"; return 1; }
-	if echo "$_nat" | grep -q 'OUTPUT -j BTKN_OUT'; then
+	echo "$_nat" | grep -q BTKN_PRE || { echo "FAIL: nat PREROUTING -> BTKN_PRE"; return 1; }
+	iptables -t nat -L BTKN_PRE -n --line-numbers 2>/dev/null | grep -q BTKN_TCP || { echo "FAIL: BTKN_PRE missing"; return 1; }
+	iptables -t nat -L BTKN_TCP -n --line-numbers 2>/dev/null | grep -q 11820 || { echo "FAIL: TCP REDIRECT 11820"; return 1; }
+	echo "$_mangle" | grep -q BTKN_PRE || { echo "FAIL: mangle PREROUTING -> BTKN_PRE"; return 1; }
+	iptables -t mangle -L BTKN_UDP -n --line-numbers 2>/dev/null | grep -q CONNMARK || { echo "FAIL: UDP CONNMARK restore"; return 1; }
+	iptables -t mangle -L BTKN_UDP -n --line-numbers 2>/dev/null | grep -q TPROXY || { echo "FAIL: UDP TPROXY"; return 1; }
+	iptables -t mangle -L BTKN_UDP -n --line-numbers 2>/dev/null | grep -q 11820 || { echo "FAIL: TPROXY port 11820"; return 1; }
+	_nat_out=$(iptables -t nat -L OUTPUT -n 2>/dev/null)
+	_mangle_out=$(iptables -t mangle -L OUTPUT -n 2>/dev/null)
+	if echo "$_nat_out" | grep -q BTKN_OUT; then
 		echo "FAIL: OUTPUT attached"
 		return 1
 	fi
-	if echo "$_mangle" | grep -q 'OUTPUT -j BTKN_OUT'; then
+	if echo "$_mangle_out" | grep -q BTKN_OUT; then
 		echo "FAIL: mangle OUTPUT attached"
 		return 1
 	fi
 	if have ip6tables; then
-		if ip6tables -t nat -S 2>/dev/null | grep -q BTKN_ || ip6tables -t mangle -S 2>/dev/null | grep -q BTKN_; then
+		if ip6tables -t nat -L -n 2>/dev/null | grep -q BTKN_ || ip6tables -t mangle -L -n 2>/dev/null | grep -q BTKN_; then
 			echo "FAIL: IPv6 BTKN present"
 			return 1
 		fi
@@ -488,7 +509,7 @@ cmd_restart_manager() {
 		echo "FAIL: fresh reconcile after manager restart"
 		return 1
 	fi
-	_jumps=$(iptables -t nat -S PREROUTING 2>/dev/null | grep -c -- '-j BTKN_PRE' || true)
+	_jumps=$(iptables -t nat -L PREROUTING -n 2>/dev/null | grep -c BTKN_PRE || true)
 	echo "nat_prerouting_btkn_jumps=${_jumps}"
 	if [ "${_jumps}" -gt 1 ]; then
 		echo "FAIL: duplicate BTKN_PRE jumps"
@@ -540,14 +561,20 @@ cmd_restore_xkeen() {
 	else
 		echo "xkeen was not running at snapshot; not started"
 	fi
-	sleep 2
+	_n=0
+	while [ "$_n" -lt 30 ]; do
+		if listen_port tcp 1181 && listen_port udp 1181; then
+			record_foreign_xray
+			echo "RESTORE_XKEEN: PASS"
+			return 0
+		fi
+		_n=$((_n + 1))
+		sleep 1
+	done
 	record_foreign_xray
-	if ! listen_port tcp 1181; then
-		echo "RESTORE_XKEEN: FAIL"
-		echo "FAIL: TCP 1181 not restored"
-		return 1
-	fi
-	echo "RESTORE_XKEEN: PASS"
+	echo "RESTORE_XKEEN: FAIL"
+	echo "FAIL: TCP/UDP 1181 not restored"
+	return 1
 }
 
 cmd_verify_restore() {
@@ -581,8 +608,33 @@ cmd_dns() {
 	echo "DNS_LEAK_FREE=NOT CLAIMED"
 }
 
+cmd_arm_rescue() {
+	echo "===== ARM RESCUE ====="
+	_script="${BTKN_RESCUE_SCRIPT:-/tmp/btkn-rescue.sh}"
+	if [ ! -f "$_script" ]; then
+		echo "FAIL: missing $_script"
+		return 1
+	fi
+	mkdir -p /opt/blacktemple-kn/run 2>/dev/null || true
+	sh "$_script" arm "r6i-$$" "${BTKN_RESCUE_DEADLINE_SEC:-90}"
+	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.current ]; then
+		echo "FAIL: rescue not armed"
+		return 1
+	fi
+	echo "RESCUE_ARMED=1"
+}
+
+cmd_disarm_rescue() {
+	echo "===== DISARM RESCUE ====="
+	_script="${BTKN_RESCUE_SCRIPT:-/tmp/btkn-rescue.sh}"
+	if [ -f "$_script" ]; then
+		sh "$_script" disarm || true
+	fi
+	echo "RESCUE_DISARMED=1"
+}
+
 usage() {
-	echo "usage: router-smoke-app.sh {deps|snapshot|resolve-client|start-our-xray|pre-xkeen|stop-xkeen|apply|verify-capture|counters|fail-open|restart-manager|cleanup-btkn|stop-blacktemple|restore-xkeen|verify-restore|dns}"
+	echo "usage: router-smoke-app.sh {deps|snapshot|resolve-client|arm-rescue|start-our-xray|pre-xkeen|stop-xkeen|apply|verify-capture|counters|fail-open|restart-manager|cleanup-btkn|stop-blacktemple|restore-xkeen|verify-restore|disarm-rescue|dns}"
 }
 
 require_gates
@@ -597,6 +649,7 @@ case "$_cmd" in
 	deps) cmd_deps ;;
 	snapshot) cmd_snapshot ;;
 	resolve-client) cmd_resolve_client ;;
+	arm-rescue) cmd_arm_rescue ;;
 	start-our-xray) cmd_start_our_xray ;;
 	pre-xkeen) cmd_pre_xkeen ;;
 	stop-xkeen) cmd_stop_xkeen ;;
@@ -609,6 +662,7 @@ case "$_cmd" in
 	stop-blacktemple) cmd_stop_blacktemple ;;
 	restore-xkeen) cmd_restore_xkeen ;;
 	verify-restore) cmd_verify_restore ;;
+	disarm-rescue) cmd_disarm_rescue ;;
 	dns) cmd_dns ;;
 	*)
 		usage

@@ -25,15 +25,26 @@ func readyNet() NetworkStatus {
 	}
 }
 
+func captureOn() *bool {
+	v := true
+	return &v
+}
+
+func captureOff() *bool {
+	v := false
+	return &v
+}
+
 func TestReconcileManagerMissingNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: filepath.Join(dir, "missing-manager"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    filepath.Join(dir, "missing-manager"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -49,12 +60,13 @@ func TestReconcileManagerMissingNoCapture(t *testing.T) {
 func TestReconcileXrayMissingNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    filepath.Join(dir, "missing-xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       filepath.Join(dir, "missing-xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-missing" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -64,12 +76,13 @@ func TestReconcileXrayMissingNoCapture(t *testing.T) {
 func TestReconcileXrayDeadNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return false },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return false },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -79,12 +92,13 @@ func TestReconcileXrayDeadNoCapture(t *testing.T) {
 func TestReconcileStateCorruptNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{not-json`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{not-json`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -94,12 +108,13 @@ func TestReconcileStateCorruptNoCapture(t *testing.T) {
 func TestReconcileUnknownStateNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"WAT"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"WAT"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -109,12 +124,13 @@ func TestReconcileUnknownStateNoCapture(t *testing.T) {
 func TestReconcileConfigCorruptNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "config-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -124,12 +140,13 @@ func TestReconcileConfigCorruptNoCapture(t *testing.T) {
 func TestReconcileNetworkNotReadyNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     NetworkStatus{OptMounted: true},
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        NetworkStatus{OptMounted: true},
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "network-not-ready" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -139,12 +156,13 @@ func TestReconcileNetworkNotReadyNoCapture(t *testing.T) {
 func TestReconcileReadyDoesNotCaptureOUTPUTOrCallIptables(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{"log":{}}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{"log":{}}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
 	})
 	if r.Decision != DecisionReady {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -160,12 +178,13 @@ func TestReconcileReadyDoesNotCaptureOUTPUTOrCallIptables(t *testing.T) {
 func TestReconcileBackoffDesiredAbsent(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"BACKOFF"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"BACKOFF"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
 		t.Fatalf("BACKOFF must desire capture absent: %s %s", r.Decision, r.Reason)
@@ -175,12 +194,13 @@ func TestReconcileBackoffDesiredAbsent(t *testing.T) {
 func TestReconcileStoppedStateNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"STOPPED"}`),
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"STOPPED"}`),
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "xray-dead" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -191,12 +211,13 @@ func TestReconcileStatePathCorruptNoCapture(t *testing.T) {
 	dir := t.TempDir()
 	p := writeJSON(t, dir, "state.json", `{"state"`)
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StatePath:   p,
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StatePath:      p,
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "state-corrupt" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -235,13 +256,14 @@ func TestReconcileStopRemovesBTKNContract(t *testing.T) {
 func TestReconcilePolicyGrantDeniedIsFailOpen(t *testing.T) {
 	dir := t.TempDir()
 	r := Reconcile(ReconcileInput{
-		ManagerPath: writeExec(t, dir, "blacktempled"),
-		XrayPath:    writeExec(t, dir, "xray"),
-		Network:     readyNet(),
-		Alive:       func() bool { return true },
-		ConfigPath:  writeJSON(t, dir, "cfg.json", `{}`),
-		StateJSON:   []byte(`{"state":"RUNNING"}`),
-		Policy:      grantDenied{},
+		CaptureEnabled: captureOn(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
+		Policy:         grantDenied{},
 	})
 	if r.Decision != DecisionDesiredAbsent || r.Reason != "keenetic-deny" {
 		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
@@ -251,6 +273,41 @@ func TestReconcilePolicyGrantDeniedIsFailOpen(t *testing.T) {
 type grantDenied struct{}
 
 func (grantDenied) CaptureMayGrantDeniedInternet() bool { return true }
+
+func TestReconcileCaptureDisabledWinsOverReady(t *testing.T) {
+	dir := t.TempDir()
+	r := Reconcile(ReconcileInput{
+		CaptureEnabled: captureOff(),
+		ManagerPath:    writeExec(t, dir, "blacktempled"),
+		XrayPath:       writeExec(t, dir, "xray"),
+		Network:        readyNet(),
+		Alive:          func() bool { return true },
+		ConfigPath:     writeJSON(t, dir, "cfg.json", `{"log":{}}`),
+		StateJSON:      []byte(`{"state":"RUNNING"}`),
+	})
+	if r.Decision != DecisionDesiredAbsent || r.Reason != ReasonCaptureDisabled {
+		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
+	}
+	if r.CaptureOUTPUT {
+		t.Fatal("OUTPUT must stay DIRECT")
+	}
+}
+
+func TestReconcileMissingCaptureConfigIsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	r := Reconcile(ReconcileInput{
+		ManagerPath:       writeExec(t, dir, "blacktempled"),
+		XrayPath:          writeExec(t, dir, "xray"),
+		Network:           readyNet(),
+		Alive:             func() bool { return true },
+		ConfigPath:        writeJSON(t, dir, "cfg.json", `{"log":{}}`),
+		StateJSON:         []byte(`{"state":"RUNNING"}`),
+		CaptureConfigPath: filepath.Join(dir, "no-such-config.json"),
+	})
+	if r.Decision != DecisionDesiredAbsent || r.Reason != ReasonCaptureDisabled {
+		t.Fatalf("decision %s reason %s", r.Decision, r.Reason)
+	}
+}
 
 func writeJSON(t *testing.T, dir, name, body string) string {
 	t.Helper()

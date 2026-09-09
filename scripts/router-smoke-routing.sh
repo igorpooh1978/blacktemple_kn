@@ -20,9 +20,9 @@ XKEEN_INIT="/opt/etc/init.d/S05xkeen"
 BT_INIT="/opt/etc/init.d/S99blacktemple-kn"
 
 require_gates() {
-	if [ "${BTKN_ALLOW_ROUTING_MUTATION}" != "1" ] || [ "${BTKN_ALLOW_XKEEN_STOP}" != "1" ]; then
+	if [ "${BTKN_ALLOW_ROUTING_MUTATION}" != "1" ] || [ "${BTKN_ALLOW_XKEEN_STOP}" != "1" ] || [ "${BTKN_PRODUCTION_ROUTER_MUTATION_ACK}" != "I_ACCEPT_NETWORK_LOSS" ]; then
 		echo "LIVE ROUTING SMOKE: NOT RUN"
-		echo "reason: requires BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1"
+		echo "reason: requires BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 BTKN_PRODUCTION_ROUTER_MUTATION_ACK=I_ACCEPT_NETWORK_LOSS"
 		exit 0
 	fi
 }

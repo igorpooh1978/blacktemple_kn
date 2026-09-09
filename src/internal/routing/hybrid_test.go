@@ -244,6 +244,64 @@ func TestXKeenCollision(t *testing.T) {
 	}
 }
 
+func TestResidualXKeenCaptureRefusesApply(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.ssOut = ""
+	fx.pidofOut = ""
+	fx.pidofErr = errors.New("fake: no xkeen process")
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.XKeenState != XKeenResidual {
+		t.Fatalf("state=%s want XKEEN_RESIDUAL_CAPTURE", rep.XKeenState)
+	}
+	before := countMutating(fx.snapshot())
+	if err := eng.Apply(context.Background()); !errors.Is(err, ErrExistingCaptureEngine) {
+		t.Fatalf("Apply: %v", err)
+	}
+	after := countMutating(fx.snapshot())
+	if after != before {
+		t.Fatalf("residual XKeen must not mutate BTKN: %d then %d", before, after)
+	}
+	for _, c := range fx.snapshot() {
+		line := argvLine(c)
+		if strings.Contains(line, " -D ") && strings.Contains(line, "xkeen") {
+			t.Fatalf("must not delete XKeen: %s", line)
+		}
+	}
+}
+
+func TestDisabledRemoveOwnedNeverTouchesXKeen(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181\n-N BTKN_PRE"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.ipRule = "99:\tfrom all fwmark 0x111 lookup 111\n"
+	eng := newTestEngine(t, fx)
+	if err := eng.Reconcile(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fx.snapshot() {
+		line := argvLine(c)
+		if hasTokenArgs(c, "xkeen") {
+			t.Fatalf("RemoveOwned must not name xkeen: %s", line)
+		}
+		if hasTokenArgs(c, "0x111") || hasTokenArgs(c, "1181") {
+			t.Fatalf("RemoveOwned must not touch XKeen mark/port: %s", line)
+		}
+		args := strings.Join(c.Args, " ")
+		if strings.Contains(args, "lookup 111") || strings.Contains(args, "table 111") {
+			t.Fatalf("RemoveOwned must not touch table 111: %s", line)
+		}
+		if c.Name == "iptables" && hasTokenArgs(c, "-A") && hasTokenArgs(c, "BTKN_PRE") && hasTokenArgs(c, "PREROUTING") {
+			t.Fatalf("disabled Reconcile must not Apply BTKN jump: %s", line)
+		}
+	}
+}
+
 func TestApply(t *testing.T) {
 	fx := newFakeExecutor()
 	eng := newTestEngine(t, fx)

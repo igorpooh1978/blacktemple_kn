@@ -28,7 +28,9 @@ func main() {
 func dispatch(args []string) error {
 	if len(args) > 0 && args[0] == platform.NetfilterReconcileArg {
 		stop := len(args) > 1 && args[1] == platform.NetfilterReconcileStopArg
-		return platform.ExecuteNetfilterReconcile(context.Background(), platform.NFCommand{Stop: stop})
+		ctx, cancel := context.WithTimeout(context.Background(), platform.NetfilterReconcileTimeout)
+		defer cancel()
+		return platform.ExecuteNetfilterReconcile(ctx, platform.NFCommand{Stop: stop})
 	}
 	if len(args) > 0 && args[0] == "xray-start" {
 		return runXrayStart(args[1:])
@@ -44,6 +46,8 @@ func dispatch(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	_ = platform.EnsureCaptureConfig(platform.CaptureConfigPath(platform.PrefixDir))
 
 	a, err := app.New(app.Config{
 		Listen:     *listen,

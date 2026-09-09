@@ -4,9 +4,10 @@
   KN-1011 hardware gate: read-only probe and gated mutating routing smoke (Windows OpenSSH).
 
 .PARAMETER Mode
-  Smoke (default): live IPv4 hybrid routing smoke. Requires BOTH
-  BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1, otherwise prints
-  LIVE ROUTING SMOKE: NOT RUN and exits 0.
+  Smoke (default): live IPv4 hybrid routing smoke. Requires ALL THREE
+  BTKN_ALLOW_ROUTING_MUTATION=1, BTKN_ALLOW_XKEEN_STOP=1, and
+  BTKN_PRODUCTION_ROUTER_MUTATION_ACK=I_ACCEPT_NETWORK_LOSS; otherwise prints
+  LIVE ROUTING SMOKE: NOT RUN and exits 0. This script does not set those values.
   Probe: read-only capability dump (never mutates).
 
 .PARAMETER RouterAddress
@@ -458,12 +459,24 @@ function Invoke-RemoteProbeCleanup {
     return 'TIMEOUT_CLEANUP_FAILED'
 }
 
+function Get-MutationGateEnvPrefix {
+    $parts = @()
+    foreach ($name in @('BTKN_ALLOW_ROUTING_MUTATION', 'BTKN_ALLOW_XKEEN_STOP', 'BTKN_PRODUCTION_ROUTER_MUTATION_ACK')) {
+        $val = [Environment]::GetEnvironmentVariable($name)
+        if ($val) {
+            $parts += "$name=$val"
+        }
+    }
+    return ($parts -join ' ')
+}
+
 function Invoke-GatedRemote {
     param([Parameter(Mandatory = $true)][string]$Subcommand)
     $remote = "/tmp/btkn-router-smoke-routing.sh"
-    $cmd = "BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 sh $remote $Subcommand"
+    $gates = Get-MutationGateEnvPrefix
+    $cmd = "$gates sh $remote $Subcommand"
     Write-Host "remote: $Subcommand"
-    $result = Invoke-RemoteSh -RemoteCommand $cmd
+    $result = Invoke-RemoteSh -RemoteCommand $cmd.Trim()
     foreach ($line in @($result.Lines)) {
         Write-Host $line
     }
@@ -590,7 +603,12 @@ function Invoke-AppRemote {
     if ($env:BTKN_TEST_CLIENT_IPV4) {
         $client = "BTKN_TEST_CLIENT_IPV4=$($env:BTKN_TEST_CLIENT_IPV4)"
     }
-    $cmd = "BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 $client sh $remote $Subcommand"
+    $allowCtrl = ''
+    if ($env:BTKN_ALLOW_CONTROLLER_CLIENT) {
+        $allowCtrl = "BTKN_ALLOW_CONTROLLER_CLIENT=$($env:BTKN_ALLOW_CONTROLLER_CLIENT)"
+    }
+    $gates = Get-MutationGateEnvPrefix
+    $cmd = "$gates BTKN_RESCUE_SCRIPT=/tmp/btkn-rescue.sh BTKN_RESCUE_DEADLINE_SEC=180 $client $allowCtrl sh $remote $Subcommand"
     Write-Host "remote: $Subcommand"
     $result = Invoke-RemoteSh -RemoteCommand $cmd.Trim() -TimeoutMs $TimeoutMs
     foreach ($line in @($result.Lines)) {
@@ -637,6 +655,17 @@ function Invoke-AppLiveRoutingSmoke {
     if ($copyCode -ne 0) {
         Write-LiveSmokeNotRun -Reason "ssh cat copy failed (exit $copyCode); connection or credentials"
         exit 0
+    }
+    $rescueLocal = Join-Path $PSScriptRoot 'scripts\btkn-rescue.sh'
+    if (-not (Test-Path -LiteralPath $rescueLocal)) {
+        Write-Host "ERROR: missing $rescueLocal"
+        exit 1
+    }
+    Write-Host 'copying independent rescue watchdog'
+    $rescueCopy = Copy-ScriptViaSshCat -LocalPath $rescueLocal -RemotePath '/tmp/btkn-rescue.sh'
+    if ($rescueCopy -ne 0) {
+        Write-Host "ERROR: rescue copy failed (exit $rescueCopy)"
+        exit 1
     }
     $jsonCopy = Copy-ScriptViaSshCat -LocalPath $xrayLocal -RemotePath '/tmp/btkn-xray.json'
     if ($jsonCopy -ne 0) {
@@ -693,6 +722,10 @@ function Invoke-AppLiveRoutingSmoke {
             Write-Host 'LIVE ROUTING: NOT RUN'
             throw 'CLIENT_REQUIRED'
         }
+
+        $arm = Invoke-AppRemote -Subcommand 'arm-rescue'
+        foreach ($line in @($arm.Lines)) { [void]$log.Add($line) }
+        if ($arm.ExitCode -ne 0) { throw "arm-rescue failed (exit $($arm.ExitCode))" }
 
         $xr = Invoke-AppRemote -Subcommand 'start-our-xray'
         foreach ($line in @($xr.Lines)) { [void]$log.Add($line) }
@@ -763,6 +796,8 @@ function Invoke-AppLiveRoutingSmoke {
             }
             $after = Invoke-AppRemote -Subcommand 'verify-restore'
             foreach ($line in @($after.Lines)) { [void]$log.Add($line) }
+            $disarm = Invoke-AppRemote -Subcommand 'disarm-rescue'
+            foreach ($line in @($disarm.Lines)) { [void]$log.Add($line) }
         } catch {
             Write-Host "finally restore error: $($_.Exception.Message)"
             Write-Host 'RESTORE_XKEEN: FAIL'
@@ -790,8 +825,9 @@ Write-Host "router-smoke.ps1: KN-1011 hardware gate mode=$Mode"
 if ($Mode -eq 'Smoke') {
     $allowMut = $env:BTKN_ALLOW_ROUTING_MUTATION
     $allowStop = $env:BTKN_ALLOW_XKEEN_STOP
-    if ($allowMut -ne '1' -or $allowStop -ne '1') {
-        Write-LiveSmokeNotRun -Reason 'requires BTKN_ALLOW_ROUTING_MUTATION=1 and BTKN_ALLOW_XKEEN_STOP=1'
+    $ack = $env:BTKN_PRODUCTION_ROUTER_MUTATION_ACK
+    if ($allowMut -ne '1' -or $allowStop -ne '1' -or $ack -ne 'I_ACCEPT_NETWORK_LOSS') {
+        Write-LiveSmokeNotRun -Reason 'requires BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 BTKN_PRODUCTION_ROUTER_MUTATION_ACK=I_ACCEPT_NETWORK_LOSS'
         exit 0
     }
     Invoke-AppLiveRoutingSmoke

@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -26,12 +28,33 @@ type NFCommand struct {
 	Exec        routing.Executor
 	NewEngine   func(netip.Addr, routing.Executor) (routing.TrafficCaptureEngine, error)
 	RouterAddrs []netip.Addr
+	// CaptureEnabled, if non-nil, overrides the persisted master switch.
+	// Tests inject it. Production leaves it nil and loads data/config.json.
+	CaptureEnabled    *bool
+	CaptureConfigPath string
+	// AcquireLock, if set, replaces the process flock. Tests inject failures.
+	AcquireLock func(ctx context.Context, path string) (unlock func(), err error)
 }
 
 // ExecuteNetfilterReconcile is the manager entrypoint for NDM hook and stop/uninstall.
 func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 	if cmd.Prefix == "" {
 		cmd.Prefix = PrefixDir
+	}
+	lockFn := cmd.AcquireLock
+	if lockFn == nil {
+		lockFn = acquireNFLock
+	}
+	unlock, err := lockFn(ctx, netfilterLockPath(cmd.Prefix))
+	if err != nil {
+		writeLockFailedDiag(cmd)
+		if errors.Is(err, ErrNetfilterLock) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrNetfilterLock, err)
+	}
+	if unlock != nil {
+		defer unlock()
 	}
 	if cmd.ManagerPath == "" {
 		cmd.ManagerPath = DefaultManagerPath
@@ -62,6 +85,8 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 		}
 	}
 
+	xrayAlive := alive()
+
 	netStatus := NetworkStatus{
 		OptMounted:     true,
 		DefaultRoute:   true,
@@ -73,36 +98,59 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 	}
 
 	stateJSON := cmd.StateJSON
-	if len(stateJSON) == 0 && alive() {
+	if len(stateJSON) == 0 && xrayAlive {
 		stateJSON = []byte(`{"state":"RUNNING"}`)
 	}
 
+	captureOn := resolveCaptureEnabled(cmd)
+
 	dec := Reconcile(ReconcileInput{
-		Stop:        cmd.Stop,
-		ManagerPath: cmd.ManagerPath,
-		XrayPath:    cmd.XrayPath,
-		ConfigPath:  cmd.ConfigPath,
-		StateJSON:   stateJSON,
-		Network:     netStatus,
-		Alive:       alive,
+		Stop:              cmd.Stop,
+		ManagerPath:       cmd.ManagerPath,
+		XrayPath:          cmd.XrayPath,
+		ConfigPath:        cmd.ConfigPath,
+		StateJSON:         stateJSON,
+		Network:           netStatus,
+		Alive:             func() bool { return xrayAlive },
+		CaptureEnabled:    &captureOn,
+		CaptureConfigPath: cmd.CaptureConfigPath,
 	})
 
 	if cmd.RouterAddrs == nil && runtime.GOOS == "linux" {
 		cmd.RouterAddrs = ListRouterIPv4()
 	}
 
-	client, clientErr := ParseSelectedClient(loadClientString(cmd))
+	rawClient := loadClientString(cmd)
+	client, clientErr := ParseSelectedClient(rawClient)
 	if clientErr == nil && len(cmd.RouterAddrs) > 0 {
 		clientErr = RejectRouterAddress(client, cmd.RouterAddrs)
 	}
 
 	desired := !cmd.Stop && dec.Decision == DecisionDesiredPresent && clientErr == nil
+	action := "remove"
+	if desired {
+		action = "apply"
+	}
+	writeDiag := func(result string) {
+		fmt.Fprintln(os.Stderr, formatReconcileDiag(
+			ReconcileOrigin(),
+			string(dec.Decision),
+			dec.Reason,
+			clientDiag(rawClient, client, clientErr),
+			action,
+			result,
+			desired,
+			xrayAlive,
+			captureOn,
+		))
+	}
 	engClient := client
 	if !engClient.IsValid() {
 		engClient = netip.MustParseAddr("10.0.0.2")
 	}
 	eng, err := cmd.NewEngine(engClient, cmd.Exec)
 	if err != nil {
+		writeDiag("failure")
 		return err
 	}
 	if setter, ok := eng.(interface {
@@ -112,14 +160,18 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 	}
 
 	if err := eng.Reconcile(ctx, desired); err != nil {
+		writeDiag("failure")
 		return err
 	}
 	if cmd.Stop {
+		writeDiag("success")
 		return nil
 	}
 	if dec.Decision == DecisionDesiredPresent && clientErr != nil {
+		writeDiag("failure")
 		return clientErr
 	}
+	writeDiag("success")
 	return nil
 }
 
