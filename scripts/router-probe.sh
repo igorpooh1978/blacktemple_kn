@@ -21,7 +21,7 @@ redact() {
 		-e 's/[Ee][Ss][Ss][Ii][Dd][: ][^[:space:]]*/ESSID:[REDACTED-SSID]/g' \
 		-e 's/\(password\|passwd\|privateKey\|publicKey\|accessKey\|secret\|token\|uuid\)":[[:space:]]*"[^"]*"/\1":"[REDACTED]"/g' \
 		-e 's/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^[:space:]"'\'']*/[REDACTED-URL]/g' \
-	| redact_ip
+	| redact_ip | redact_ip6
 }
 
 redact_ip() {
@@ -52,6 +52,79 @@ redact_ip() {
 				rest = substr(rest, RSTART + RLENGTH)
 			}
 			print out rest
+		}
+	'
+}
+
+redact_ip6() {
+	# Redact global IPv6; keep loopback, link-local, ULA, multicast.
+	# Skip HH:MM:SS (two colons, no ::) to avoid clobbering timestamps.
+	if ! command -v awk >/dev/null 2>&1; then
+		cat
+		return 0
+	fi
+	awk '
+		function colons(s,   n, i) {
+			n = 0
+			for (i = 1; i <= length(s); i++) {
+				if (substr(s, i, 1) == ":") n++
+			}
+			return n
+		}
+		function local_ip6(ip,   n, cidr) {
+			n = tolower(ip)
+			gsub(/\[|\]/, "", n)
+			cidr = ""
+			if (match(n, /\/[0-9]+$/)) {
+				cidr = substr(n, RSTART)
+				n = substr(n, 1, RSTART - 1)
+			}
+			if (n == "::" || n == "::1") return 1
+			# Prefix-only link-local / ULA / multicast; host IIDs are redacted.
+			if (n == "fe80::" && cidr != "") return 1
+			if (n == "fc00::" || n == "fd00::" || n == "ff00::") return 1
+			return 0
+		}
+		{
+			rest = $0
+			out = ""
+			while (match(rest, /\[?[0-9A-Fa-f:]+\]?(\/[0-9]+)?/)) {
+				tok = substr(rest, RSTART, RLENGTH)
+				c = colons(tok)
+				keep = 0
+				if (c < 2) keep = 1
+				else if (c == 2 && index(tok, "::") == 0) keep = 1
+				else if (local_ip6(tok)) keep = 1
+				out = out substr(rest, 1, RSTART - 1)
+				if (keep) out = out tok
+				else out = out "[REDACTED-IP6]"
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+			print out rest
+		}
+	'
+}
+
+xkeen_ipv6_names_targets() {
+	# Chain names and jump targets only; drop -s/-d/--on-ip address args.
+	if ! command -v awk >/dev/null 2>&1; then
+		cat
+		return 0
+	fi
+	awk '
+		{
+			out = ""
+			skip = 0
+			n = split($0, a, " ")
+			for (i = 1; i <= n; i++) {
+				if (skip) { skip = 0; continue }
+				if (a[i] == "-s" || a[i] == "-d" || a[i] == "--on-ip" || a[i] == "--to" || a[i] == "--to-destination") {
+					skip = 1
+					continue
+				}
+				out = out a[i] " "
+			}
+			print out
 		}
 	'
 }
@@ -385,10 +458,58 @@ else
 	echo "NOT AVAILABLE: iptables"
 fi
 
+# ----- IP6TABLES -----
+section "IP6TABLES"
+try "ip6tables --version" ip6tables --version
+if have ip6tables; then
+	echo "--- ip6tables -t nat -S ---"
+	ip6tables -t nat -S 2>&1 | redact
+	echo "--- ip6tables -t mangle -S ---"
+	ip6tables -t mangle -S 2>&1 | redact
+	echo "--- ip6tables -t filter -S ---"
+	ip6tables -t filter -S 2>&1 | redact
+else
+	echo "NOT AVAILABLE: ip6tables"
+fi
+show_file /proc/net/ip6_tables_targets
+show_file /proc/net/ip6_tables_matches
+echo "--- IPv6 XKeen rules (names/targets only; addresses redacted) ---"
+_xkeen_ip6_nat="NOT OBSERVED"
+_xkeen_ip6_mangle="NOT OBSERVED"
+_xkeen_ip6_filter="NOT OBSERVED"
+if have ip6tables; then
+	if ip6tables -t nat -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
+		_xkeen_ip6_nat="PRESENT"
+		ip6tables -t nat -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
+	else
+		echo "no xkeen tokens in ip6tables nat"
+	fi
+	if ip6tables -t mangle -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
+		_xkeen_ip6_mangle="PRESENT"
+		ip6tables -t mangle -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
+	else
+		echo "no xkeen tokens in ip6tables mangle"
+	fi
+	if ip6tables -t filter -S 2>/dev/null | grep -i -e xkeen -e XKEEN >/dev/null; then
+		_xkeen_ip6_filter="PRESENT"
+		ip6tables -t filter -S 2>&1 | redact | grep -i -e xkeen -e XKEEN | xkeen_ipv6_names_targets
+	else
+		echo "no xkeen tokens in ip6tables filter"
+	fi
+else
+	echo "NOT AVAILABLE: ip6tables"
+fi
+echo "xkeen_ipv6_nat: ${_xkeen_ip6_nat}"
+echo "xkeen_ipv6_mangle: ${_xkeen_ip6_mangle}"
+echo "xkeen_ipv6_filter: ${_xkeen_ip6_filter}"
+echo "NOTE: IPv6 dump is evidence only. BlackTemple IPv6 capture remains UNVERIFIED. Not SUPPORTED."
+
 # ----- TARGETS -----
 section "TARGETS"
 show_file /proc/net/ip_tables_targets
 show_file /proc/net/ip_tables_matches
+show_file /proc/net/ip6_tables_targets
+show_file /proc/net/ip6_tables_matches
 echo "--- iptables help (read-only) ---"
 if have iptables; then
 	iptables -h 2>&1 | redact
@@ -420,6 +541,33 @@ for _t in TPROXY MARK CONNMARK REDIRECT; do
 		echo "${_t}: PRESENT (${_src} )"
 	else
 		echo "${_t}: NOT OBSERVED"
+	fi
+done
+echo "--- IPv6 TPROXY MARK CONNMARK REDIRECT (read-only evidence) ---"
+for _t in TPROXY MARK CONNMARK REDIRECT; do
+	_src=""
+	if [ -r /proc/net/ip6_tables_targets ] && grep -qw "$_t" /proc/net/ip6_tables_targets 2>/dev/null; then
+		_src="${_src} ip6_tables_targets"
+	fi
+	if [ -r /proc/modules ]; then
+		if grep -q "xt_${_t}" /proc/modules 2>/dev/null || grep -q "ip6t_${_t}" /proc/modules 2>/dev/null; then
+			_src="${_src} proc_modules"
+		fi
+	fi
+	if have lsmod; then
+		if lsmod 2>/dev/null | grep -q "xt_${_t}\|ip6t_${_t}"; then
+			_src="${_src} lsmod"
+		fi
+	fi
+	if have ip6tables; then
+		if ip6tables -h 2>/dev/null | grep -qw "$_t"; then
+			_src="${_src} ip6tables_help"
+		fi
+	fi
+	if [ -n "$_src" ]; then
+		echo "IPv6 ${_t}: PRESENT (${_src} )"
+	else
+		echo "IPv6 ${_t}: NOT OBSERVED"
 	fi
 done
 
@@ -697,8 +845,10 @@ echo "capture hints: UNKNOWN until topic excerpts/iptables names reviewed"
 echo "DNS interception hints: UNKNOWN"
 echo "PBR/mark hints: UNKNOWN"
 echo "own chains: nat=${_xkeen_nat} mangle=${_xkeen_mangle}"
+echo "own IPv6 chains: nat=${_xkeen_ip6_nat:-UNKNOWN} mangle=${_xkeen_ip6_mangle:-UNKNOWN} filter=${_xkeen_ip6_filter:-UNKNOWN}"
 echo "own ports: see listen lines"
 echo "Entware traffic handling hints: UNKNOWN"
+echo "IPv6 capture (BlackTemple): UNVERIFIED"
 
 # ----- INIT -----
 section "INIT"
@@ -825,6 +975,7 @@ echo "Per-process swap control possible: ${_per_swap}"
 echo "tcp53_listener: ${_dns_tcp:-UNKNOWN}"
 echo "udp53_listener: ${_dns_udp:-UNKNOWN}"
 echo "NOTE: TPROXY/REDIRECT/MARK in iptables help is PRESENT/NOT OBSERVED, not SUPPORTED"
+echo "IPv6 capture (BlackTemple): UNVERIFIED (see IP6TABLES dump; not a capture path proof)"
 
 echo ""
 echo "===== END ====="
