@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getAuthState,
+  parseAuthState,
   parseStatus,
   postConnection,
   postLogin,
@@ -78,5 +80,29 @@ describe("parseStatus", () => {
         key: "missing",
       })?.connection,
     ).toBe("disconnected");
+  });
+});
+
+describe("auth state", () => {
+  it("fetches GET /api/v1/auth/state with credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ initialized: true, authenticated: false }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await getAuthState();
+    expect(res.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/state");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("parses public auth flags only", () => {
+    expect(parseAuthState({ initialized: true, authenticated: false })).toEqual({
+      initialized: true,
+      authenticated: false,
+    });
+    expect(parseAuthState({ initialized: true })).toBeNull();
   });
 });

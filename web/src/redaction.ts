@@ -68,5 +68,8 @@ export async function importBlackKey(options: {
   if (res.status === 201) {
     return { status: 201, nextFieldValue: "" };
   }
+  if (res.status === 401) {
+    return { status: 401, nextFieldValue: "" };
+  }
   return { status: res.status, nextFieldValue: blackKey };
 }

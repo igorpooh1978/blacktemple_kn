@@ -1,0 +1,17 @@
+export { default as IconAlertTriangle } from "@tabler/icons-preact/dist/esm/icons/IconAlertTriangle.mjs";
+export { default as IconArrowLeft } from "@tabler/icons-preact/dist/esm/icons/IconArrowLeft.mjs";
+export { default as IconCheck } from "@tabler/icons-preact/dist/esm/icons/IconCheck.mjs";
+export { default as IconChevronRight } from "@tabler/icons-preact/dist/esm/icons/IconChevronRight.mjs";
+export { default as IconCpu } from "@tabler/icons-preact/dist/esm/icons/IconCpu.mjs";
+export { default as IconInfoCircle } from "@tabler/icons-preact/dist/esm/icons/IconInfoCircle.mjs";
+export { default as IconKey } from "@tabler/icons-preact/dist/esm/icons/IconKey.mjs";
+export { default as IconLoader2 } from "@tabler/icons-preact/dist/esm/icons/IconLoader2.mjs";
+export { default as IconLock } from "@tabler/icons-preact/dist/esm/icons/IconLock.mjs";
+export { default as IconLogin } from "@tabler/icons-preact/dist/esm/icons/IconLogin.mjs";
+export { default as IconPower } from "@tabler/icons-preact/dist/esm/icons/IconPower.mjs";
+export { default as IconRefresh } from "@tabler/icons-preact/dist/esm/icons/IconRefresh.mjs";
+export { default as IconRoute } from "@tabler/icons-preact/dist/esm/icons/IconRoute.mjs";
+export { default as IconServer } from "@tabler/icons-preact/dist/esm/icons/IconServer.mjs";
+export { default as IconSettings } from "@tabler/icons-preact/dist/esm/icons/IconSettings.mjs";
+export { default as IconShieldCheck } from "@tabler/icons-preact/dist/esm/icons/IconShieldCheck.mjs";
+export { default as IconShieldOff } from "@tabler/icons-preact/dist/esm/icons/IconShieldOff.mjs";

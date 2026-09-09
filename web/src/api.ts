@@ -184,6 +184,24 @@ export function getStatus(): Promise<Response> {
   return apiFetch("/api/v1/status");
 }
 
+export function getAuthState(): Promise<Response> {
+  return apiFetch("/api/v1/auth/state");
+}
+
+export function parseAuthState(data: unknown): {
+  initialized: boolean;
+  authenticated: boolean;
+} | null {
+  if (data === null || typeof data !== "object") {
+    return null;
+  }
+  const o = data as Record<string, unknown>;
+  if (typeof o.initialized !== "boolean" || typeof o.authenticated !== "boolean") {
+    return null;
+  }
+  return { initialized: o.initialized, authenticated: o.authenticated };
+}
+
 export function getVersion(): Promise<Response> {
   return apiFetch("/api/v1/version");
 }
