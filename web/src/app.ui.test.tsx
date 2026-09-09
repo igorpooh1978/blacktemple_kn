@@ -42,7 +42,7 @@ function installFetch(impl: (input: RequestInfo | URL, init?: RequestInit) => Pr
 }
 
 function stubApi(opts: {
-  auth?: { initialized: boolean; authenticated: boolean };
+  auth?: { initialized: boolean; authenticated: boolean } | null;
   statusCode?: number;
   statusBody?: StatusBody;
   setupStatus?: number;
@@ -63,6 +63,9 @@ function stubApi(opts: {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     if (url.includes("/api/v1/auth/state") && method === "GET") {
+      if (opts.auth === null) {
+        return jsonRes(404);
+      }
       return jsonRes(200, auth);
     }
     if (url.includes("/api/v1/status") && method === "GET") {
@@ -181,6 +184,15 @@ describe("main connection hero", () => {
     await see("VPN отключён");
     expect(root.textContent).not.toContain("VPN подключён");
     expect(findButton("Подключить").disabled).toBe(false);
+  });
+
+  it("reaches the main screen from GET /status when auth/state is unavailable", async () => {
+    stubApi({
+      auth: null,
+      statusBody: disconnectedStatus(),
+    });
+    mount();
+    await see("VPN отключён");
   });
 
   it("disables the connect action while connecting", async () => {

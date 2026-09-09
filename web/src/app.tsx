@@ -73,18 +73,21 @@ export function App() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await getAuthState();
-        if (cancelled || res.status !== 200) {
-          return;
+        const authRes = await getAuthState();
+        if (!cancelled && authRes.status === 200) {
+          const state = parseAuthState(await readJson(authRes));
+          if (state) {
+            const next = screenFromAuthState(state);
+            setScreen(next);
+            if (next === "main") {
+              await loadStatus();
+            }
+            return;
+          }
         }
-        const state = parseAuthState(await readJson(res));
-        if (!state || cancelled) {
-          return;
-        }
-        const next = screenFromAuthState(state);
-        setScreen(next);
-        if (next === "main") {
-          await loadStatus();
+        const ok = await loadStatus();
+        if (!cancelled && ok) {
+          setScreen("main");
         }
       } catch {
         /* daemon unreachable — stay on first-run */
@@ -102,14 +105,13 @@ export function App() {
     const id = setInterval(() => {
       (async () => {
         try {
-          const res = await getAuthState();
-          if (res.status !== 200) {
-            return;
-          }
-          const state = parseAuthState(await readJson(res));
-          if (state && !state.authenticated) {
-            expireSession();
-            return;
+          const authRes = await getAuthState();
+          if (authRes.status === 200) {
+            const state = parseAuthState(await readJson(authRes));
+            if (state && !state.authenticated) {
+              expireSession();
+              return;
+            }
           }
           await loadStatus();
         } catch {
