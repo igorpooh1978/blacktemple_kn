@@ -223,3 +223,147 @@ func TestEphemeralListenPort(t *testing.T) {
 		t.Fatalf("expected loopback listen: %s", raw)
 	}
 }
+
+func TestTransparentGoldenConfig(t *testing.T) {
+	got, err := Generate(fixtureProfile("tcp", "tls"), fixtureSecrets(), fixtureParams("tcp"), Options{Transparent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "golden-vless-tls-tcp-transparent.json")
+	if os.Getenv("UPDATE_XRAY_GOLDEN") == "1" {
+		if err := os.WriteFile(path, append(append([]byte{}, got...), '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, bytes.TrimSuffix(want, []byte("\n"))) && !bytes.Equal(got, want) {
+		t.Fatalf("golden mismatch\ngot:  %s\nwant: %s", got, bytes.TrimSpace(want))
+	}
+}
+
+func TestTransparentTCPAndUDPInbound(t *testing.T) {
+	raw, err := Generate(fixtureProfile("tcp", "tls"), fixtureSecrets(), fixtureParams("tcp"), Options{Transparent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Inbounds []struct {
+			Tag      string `json:"tag"`
+			Listen   string `json:"listen"`
+			Port     int    `json:"port"`
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Network        string `json:"network"`
+				FollowRedirect bool   `json:"followRedirect"`
+				Auth           string `json:"auth"`
+				UDP            bool   `json:"udp"`
+			} `json:"settings"`
+			StreamSettings *struct {
+				Sockopt struct {
+					TProxy string `json:"tproxy"`
+				} `json:"sockopt"`
+			} `json:"streamSettings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Inbounds) != 2 {
+		t.Fatalf("inbounds=%d want 2 (socks + dokodemo)", len(cfg.Inbounds))
+	}
+	socks := cfg.Inbounds[0]
+	if socks.Protocol != "socks" || socks.Listen != "127.0.0.1" || socks.Port != 11080 {
+		t.Fatalf("socks inbound changed: %+v", socks)
+	}
+	if socks.Settings.Auth != "noauth" || !socks.Settings.UDP {
+		t.Fatalf("socks settings changed: %+v", socks.Settings)
+	}
+	tr := cfg.Inbounds[1]
+	if tr.Tag != "transparent-in" || tr.Protocol != "dokodemo-door" {
+		t.Fatalf("transparent inbound: %+v", tr)
+	}
+	if tr.Listen != "127.0.0.1" || tr.Port != DefaultTransparentPort {
+		t.Fatalf("transparent listen %s:%d", tr.Listen, tr.Port)
+	}
+	if tr.Port == 1181 {
+		t.Fatal("transparent port must never be 1181")
+	}
+	if tr.Settings.Network != "tcp,udp" {
+		t.Fatalf("network=%q want tcp,udp", tr.Settings.Network)
+	}
+	if !strings.Contains(tr.Settings.Network, "tcp") || !strings.Contains(tr.Settings.Network, "udp") {
+		t.Fatalf("TCP+UDP inbound missing: %q", tr.Settings.Network)
+	}
+	if !tr.Settings.FollowRedirect {
+		t.Fatal("followRedirect must be true")
+	}
+	if tr.StreamSettings == nil || tr.StreamSettings.Sockopt.TProxy != "tproxy" {
+		t.Fatalf("sockopt.tproxy: %+v", tr.StreamSettings)
+	}
+}
+
+func TestInvalidTransparentConfig(t *testing.T) {
+	okSecrets := fixtureSecrets()
+	okParams := fixtureParams("tcp")
+	profile := fixtureProfile("tcp", "tls")
+	cases := []struct {
+		name string
+		opts Options
+		sub  string
+	}{
+		{
+			name: "xkeen live port 1181",
+			opts: Options{Transparent: true, TransparentPort: 1181},
+			sub:  "1181",
+		},
+		{
+			name: "transparent port too high",
+			opts: Options{Transparent: true, TransparentPort: 70000},
+			sub:  "listen port must be",
+		},
+		{
+			name: "transparent collides with socks",
+			opts: Options{Transparent: true, ListenPort: 11080, TransparentPort: 11080},
+			sub:  "collides",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Generate(profile, okSecrets, okParams, tc.opts)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.sub) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.sub)
+			}
+			if strings.Contains(err.Error(), fixtureUUID) {
+				t.Fatalf("error leaked uuid: %v", err)
+			}
+		})
+	}
+}
+
+func TestSocksGoldensHaveNoTransparentInbound(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "golden-vless-*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no golden files")
+	}
+	for _, path := range files {
+		if strings.Contains(filepath.Base(path), "transparent") {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("dokodemo-door")) || bytes.Contains(raw, []byte("11820")) {
+			t.Fatalf("%s unexpectedly contains transparent inbound", path)
+		}
+	}
+}

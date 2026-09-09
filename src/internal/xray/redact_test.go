@@ -22,3 +22,17 @@ func TestRedactSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactTransparentGeneratedConfig(t *testing.T) {
+	raw, err := Generate(fixtureProfile("tcp", "tls"), fixtureSecrets(), fixtureParams("tcp"), Options{Transparent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), fixtureUUID) {
+		t.Fatal("fixture uuid must be present in generated config")
+	}
+	out := Redact(string(raw), fixtureSecrets())
+	if strings.Contains(out, fixtureUUID) {
+		t.Fatalf("leaked uuid in redacted transparent config: %s", out)
+	}
+}
