@@ -116,3 +116,12 @@ Feature: Routing capture
     Given live capture
     Then DNS :53 and ndnproxy are not mutated by BlackTemple
     And DNS leak-free is not claimed
+
+  @BTKN-ROUT-020 @P0 @routing
+  Scenario: Residual XKeen capture blocks BTKN Apply
+    Given no live XKeen listener
+    And leftover XKeen redirect or PREROUTING jump remains
+    When Apply runs
+    Then the state is XKEEN_RESIDUAL_CAPTURE
+    And ErrExistingCaptureEngine is returned
+    And XKeen rules are not deleted

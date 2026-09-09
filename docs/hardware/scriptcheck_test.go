@@ -202,6 +202,29 @@ func TestSmokeHarnessRequiresMutationGates(t *testing.T) {
 	}
 }
 
+func TestSmokeRequiresProductionRouterMutationAck(t *testing.T) {
+	ps1 := readRepoFile(t, "router-smoke.ps1")
+	sh := readRepoFile(t, "scripts", "router-smoke-routing.sh")
+	app := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	for _, s := range []string{ps1, sh, app} {
+		if !strings.Contains(s, "BTKN_PRODUCTION_ROUTER_MUTATION_ACK") {
+			t.Fatal("mutation smoke must require BTKN_PRODUCTION_ROUTER_MUTATION_ACK")
+		}
+		if !strings.Contains(s, "I_ACCEPT_NETWORK_LOSS") {
+			t.Fatal("ACK value must be I_ACCEPT_NETWORK_LOSS")
+		}
+	}
+	if strings.Contains(ps1, `$cmd = "BTKN_ALLOW_ROUTING_MUTATION=1`) {
+		t.Fatal("PowerShell must not hardcode mutation=1 onto the remote command")
+	}
+	if strings.Contains(ps1, "BTKN_ALLOW_ROUTING_MUTATION=1 BTKN_ALLOW_XKEEN_STOP=1 BTKN_RESCUE_SCRIPT") {
+		t.Fatal("PowerShell must not inject mutation gates")
+	}
+	if !strings.Contains(ps1, `$ack -ne 'I_ACCEPT_NETWORK_LOSS'`) {
+		t.Fatal("PowerShell must refuse Smoke without the production-router ACK")
+	}
+}
+
 func TestXKeenRestoreFailureFailsGate(t *testing.T) {
 	ps1 := readRepoFile(t, "router-smoke.ps1")
 	sh := readRepoFile(t, "scripts", "router-smoke-app.sh")
@@ -297,10 +320,76 @@ func TestAppSmokeDoesNotMutateDNS(t *testing.T) {
 	}
 }
 
+func TestAppSmokeRestorePolls1181(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	idx := strings.Index(s, "cmd_restore_xkeen()")
+	if idx < 0 {
+		t.Fatal("cmd_restore_xkeen missing")
+	}
+	body := s[idx:]
+	if end := strings.Index(body, "\ncmd_"); end > 0 {
+		body = body[:end]
+	}
+	if strings.Contains(body, "sleep 2") && !strings.Contains(body, "while") {
+		t.Fatal("restore must poll 1181, not a single sleep 2")
+	}
+	if !strings.Contains(body, "while") || !strings.Contains(body, "1181") {
+		t.Fatal("restore must bounded-poll TCP/UDP 1181")
+	}
+}
+
+func TestAppSmokeRequiresArmedRescue(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	if !strings.Contains(s, "require_rescue") {
+		t.Fatal("app smoke must require_rescue before mutating XKeen/BTKN")
+	}
+	if !strings.Contains(s, "cmd_stop_xkeen") || !strings.Contains(s, "cmd_apply") {
+		t.Fatal("stop-xkeen/apply must exist")
+	}
+	stopIdx := strings.Index(s, "cmd_stop_xkeen()")
+	applyIdx := strings.Index(s, "cmd_apply()")
+	if stopIdx < 0 || applyIdx < 0 {
+		t.Fatal("missing stop/apply")
+	}
+	if !strings.Contains(s[stopIdx:stopIdx+400], "require_rescue") {
+		t.Fatal("stop-xkeen must call require_rescue")
+	}
+	if !strings.Contains(s[applyIdx:applyIdx+400], "require_rescue") {
+		t.Fatal("apply must call require_rescue")
+	}
+	ps1 := readRepoFile(t, "router-smoke.ps1")
+	if !strings.Contains(ps1, "btkn-rescue.sh") {
+		t.Fatal("PowerShell must copy/arm btkn-rescue.sh")
+	}
+}
+
+func TestAppSmokeRefusesControllerClient(t *testing.T) {
+	s := readRepoFile(t, "scripts", "router-smoke-app.sh")
+	resolve := s
+	idx := strings.Index(s, "cmd_resolve_client()")
+	if idx >= 0 {
+		resolve = s[idx:]
+		if end := strings.Index(resolve[1:], "\ncmd_"); end > 0 {
+			resolve = resolve[:end+1]
+		}
+	}
+	if strings.Contains(resolve, `_src="SSH_CONNECTION"`) {
+		t.Fatal("SSH_CONNECTION must not be a capture-client fallback")
+	}
+	if !strings.Contains(s, "BTKN_ALLOW_CONTROLLER_CLIENT") {
+		t.Fatal("controller client must require BTKN_ALLOW_CONTROLLER_CLIENT=1")
+	}
+	if !strings.Contains(s, "CLIENT_REQUIRED") {
+		t.Fatal("missing CLIENT_REQUIRED")
+	}
+}
+
 func TestDaemonSourcesNeverStopXKeen(t *testing.T) {
 	files := [][]string{
 		{"src", "cmd", "blacktempled", "main.go"},
 		{"src", "internal", "platform", "nfcmd.go"},
+		{"src", "internal", "platform", "reconcile.go"},
+		{"src", "internal", "platform", "capturecfg.go"},
 		{"packaging", "keenetic", "netfilter.d", "blacktemple-kn.sh"},
 		{"packaging", "init", "S99blacktemple-kn"},
 	}
@@ -308,6 +397,9 @@ func TestDaemonSourcesNeverStopXKeen(t *testing.T) {
 		s := readRepoFile(t, rel...)
 		if strings.Contains(s, "S05xkeen") || strings.Contains(s, "xkeen stop") {
 			t.Errorf("%s must not stop XKeen", filepath.Join(rel...))
+		}
+		if strings.Contains(s, "killall") || strings.Contains(s, "pkill") {
+			t.Errorf("%s must not killall/pkill", filepath.Join(rel...))
 		}
 	}
 }

@@ -12,7 +12,10 @@
 # Capture apply/remove is owned by blacktempled netfilter-reconcile
 # (HybridIptablesEngine). This hook contains no firewall policy.
 # Production daemon never stops XKeen.
+# This hook does not enable capture.enabled and contains no firewall policy.
 #
 BIN=/opt/blacktemple-kn/bin/blacktempled
 [ -x "$BIN" ] || exit 0
+BTKN_NDM_HOOK=1
+export BTKN_NDM_HOOK
 exec "$BIN" netfilter-reconcile

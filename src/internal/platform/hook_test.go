@@ -75,3 +75,21 @@ func TestNDMHookNoUserStringInterpolation(t *testing.T) {
 		t.Fatal("manager missing must fail-open (exit 0, no capture)")
 	}
 }
+
+func TestNDMHookExportsOriginEnv(t *testing.T) {
+	p := filepath.Join("..", "..", "..", "packaging", "keenetic", "netfilter.d", "blacktemple-kn.sh")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, NDMHookEnv+"=1") {
+		t.Fatal("hook must set BTKN_NDM_HOOK=1")
+	}
+	if !strings.Contains(text, "export "+NDMHookEnv) {
+		t.Fatal("hook must export BTKN_NDM_HOOK")
+	}
+	if !strings.Contains(text, "exec \"$BIN\" "+NetfilterReconcileArg) {
+		t.Fatal("hook must still exec netfilter-reconcile")
+	}
+}

@@ -583,6 +583,133 @@
       "priority": "P0",
       "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeDoesNotMutateDNS"],
       "redProof": "RED: TestAppSmokeDoesNotMutateDNS FAIL until app smoke forbids DNS mutation; GREEN after"
+    },
+    "BTKN-LIFE-016": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestReconcileDiagDesiredFalseRemove"],
+      "redProof": "RED: TestReconcileDiagDesiredFalseRemove FAIL until stderr reports action=remove with reason"
+    },
+    "BTKN-LIFE-017": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestReconcileDiagDesiredTrueApply"],
+      "redProof": "RED: TestReconcileDiagDesiredTrueApply FAIL until stderr reports action=apply"
+    },
+    "BTKN-LIFE-018": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nflock_test.go::TestNetfilterLockPathUsesRunDir"],
+      "redProof": "RED: TestNetfilterLockPathUsesRunDir FAIL until lock is run/netfilter-reconcile.lock"
+    },
+    "BTKN-LIFE-019": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/hook_test.go::TestNDMHookExportsOriginEnv",
+        "src/internal/platform/nfcmd_test.go::TestReconcileOriginManualAndNDM"
+      ],
+      "redProof": "RED: hook/origin tests FAIL until BTKN_NDM_HOOK marks origin=ndm"
+    },
+    "BTKN-LIFE-020": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestRescueArmWatchDisarm"],
+      "redProof": "RED: TestRescueArmWatchDisarm FAIL until scripts/btkn-rescue.sh exists with arm/watch/disarm"
+    },
+    "BTKN-LIFE-021": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestRescueCleanupBTKNOnly"],
+      "redProof": "RED: TestRescueCleanupBTKNOnly FAIL until recover lists only BTKN-owned objects"
+    },
+    "BTKN-LIFE-022": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestRescueNeverTouchesXKeenNamespace"],
+      "redProof": "RED: TestRescueNeverTouchesXKeenNamespace FAIL until forbidden killall/flush/xkeen -D are absent"
+    },
+    "BTKN-LIFE-023": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeRestorePolls1181"],
+      "redProof": "RED: TestAppSmokeRestorePolls1181 FAIL while restore-xkeen uses a single sleep 2"
+    },
+    "BTKN-LIFE-024": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeRequiresArmedRescue"],
+      "redProof": "RED: TestAppSmokeRequiresArmedRescue FAIL until stop-xkeen/apply require rescue armed"
+    },
+    "BTKN-LIFE-025": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeRefusesControllerClient"],
+      "redProof": "RED: TestAppSmokeRefusesControllerClient FAIL while SSH_CONNECTION is a client fallback"
+    },
+    "BTKN-ROUT-020": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestResidualXKeenCaptureRefusesApply"],
+      "redProof": "RED: TestResidualXKeenCaptureRefusesApply FAIL until leftover 1181 redirect is XKEEN_RESIDUAL_CAPTURE"
+    },
+    "BTKN-LIFE-026": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestEnsureCaptureConfigDefaultsDisabled"],
+      "redProof": "RED: TestEnsureCaptureConfigDefaultsDisabled FAIL until canonical config defaults capture.enabled=false"
+    },
+    "BTKN-LIFE-027": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestMissingCaptureSettingIsFalse"],
+      "redProof": "RED: TestMissingCaptureSettingIsFalse FAIL until missing capture.enabled loads as false"
+    },
+    "BTKN-LIFE-028": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestDisabledCaptureNeverAppliesWithOurXrayAlive"],
+      "redProof": "RED: TestDisabledCaptureNeverAppliesWithOurXrayAlive FAIL until capture.enabled=false forces desired=false"
+    },
+    "BTKN-LIFE-029": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestDisabledCaptureNeverAppliesWithSelectedClient"],
+      "redProof": "RED: TestDisabledCaptureNeverAppliesWithSelectedClient FAIL until selected-client cannot enable Apply"
+    },
+    "BTKN-LIFE-030": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestNDMDisabledCaptureNeverApplies"],
+      "redProof": "RED: TestNDMDisabledCaptureNeverApplies FAIL until NDM origin still Removes when capture is disabled"
+    },
+    "BTKN-LIFE-031": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestManagerRestartDisabledNeverApplies"],
+      "redProof": "RED: TestManagerRestartDisabledNeverApplies FAIL until restart reconcile stays desired=false"
+    },
+    "BTKN-LIFE-032": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestDisabledCaptureRemovesOwnedOnly"],
+      "redProof": "RED: TestDisabledCaptureRemovesOwnedOnly FAIL until disabled reconcile still calls desired=false Remove"
+    },
+    "BTKN-LIFE-033": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestDisabledRemoveOwnedNeverTouchesXKeen"],
+      "redProof": "RED: TestDisabledRemoveOwnedNeverTouchesXKeen FAIL until RemoveOwned argv omits xkeen 0x111 table 111 1181"
+    },
+    "BTKN-LIFE-034": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestDaemonSourcesNeverStopXKeen"],
+      "redProof": "RED: TestDaemonSourcesNeverStopXKeen FAIL if production sources stop S05xkeen"
+    },
+    "BTKN-LIFE-035": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestCorruptCaptureConfigFailsClosed"],
+      "redProof": "RED: TestCorruptCaptureConfigFailsClosed FAIL until corrupt JSON yields enabled=false"
+    },
+    "BTKN-LIFE-036": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestEnvCannotEnableCapture"],
+      "redProof": "RED: TestEnvCannotEnableCapture FAIL until env vars cannot flip capture.enabled"
+    },
+    "BTKN-LIFE-037": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/nfcmd_test.go::TestDisabledCaptureNeverAppliesWithOurXrayAlive",
+        "src/internal/app/listen_test.go::TestAutoLANSafeHost",
+        "src/internal/app/listen_test.go::TestExplicitRefusesUnspecified"
+      ],
+      "redProof": "RED: coexistence tests FAIL if Xray-alive implies Apply or UI binds 0.0.0.0"
+    },
+    "BTKN-LIFE-038": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestSmokeRequiresProductionRouterMutationAck"],
+      "redProof": "RED: TestSmokeRequiresProductionRouterMutationAck FAIL until three mutation gates are required and not hardcoded"
     }
   }
 }

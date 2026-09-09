@@ -77,12 +77,13 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 		})
 	}
 
-	xkeen := detectXKeen(natS, mangleS, listenOut, pidofOut, pidofErr == nil)
-	if xkeen {
+	xkeen := ClassifyXKeen(natS, mangleS, listenOut, pidofOut, rules, pidofErr == nil)
+	report.XKeenState = xkeen
+	if xkeen == XKeenLive || xkeen == XKeenResidual {
 		report.XKeenActive = true
 		report.Collisions = append(report.Collisions, Collision{
 			Kind:   CollisionXKeen,
-			Detail: "xkeen capture engine detected",
+			Detail: "xkeen capture engine detected " + string(xkeen),
 		})
 	}
 
@@ -261,19 +262,31 @@ func btknChainsPresent(natS, mangleS string) bool {
 	return false
 }
 
-func detectXKeen(natS, mangleS, listenOut, pidofOut string, pidofOK bool) bool {
+// ClassifyXKeen reports LIVE, residual effective capture, or absent.
+// Comment-only xkeen_rule strings without jumps/redirects are ABSENT.
+func ClassifyXKeen(natS, mangleS, listenOut, pidofOut, ipRules string, pidofOK bool) XKeenPresence {
+	if listenPortUsed(listenOut, 1181) || (pidofOK && strings.TrimSpace(pidofOut) != "") {
+		return XKeenLive
+	}
+	if xkeenEffectiveCapture(natS, mangleS, ipRules) {
+		return XKeenResidual
+	}
+	return XKeenAbsent
+}
+
+func xkeenEffectiveCapture(natS, mangleS, ipRules string) bool {
 	blob := natS + "\n" + mangleS
-	lower := strings.ToLower(blob)
-	if strings.Contains(lower, "xkeen") || strings.Contains(lower, "xkeen_rule") {
-		return true
-	}
-	if listenPortUsed(listenOut, 1181) {
-		return true
-	}
 	if strings.Contains(blob, "--to-ports 1181") || strings.Contains(blob, "--on-port 1181") {
 		return true
 	}
-	if pidofOK && strings.TrimSpace(pidofOut) != "" {
+	for _, line := range strings.Split(blob, "\n") {
+		fields := strings.Fields(line)
+		if hasSeq(fields, "-A", "PREROUTING", "-j", "xkeen") {
+			return true
+		}
+	}
+	low := strings.ToLower(ipRules)
+	if strings.Contains(low, "0x111") && strings.Contains(ipRules, " lookup 111") {
 		return true
 	}
 	return false

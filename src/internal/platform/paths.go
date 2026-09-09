@@ -25,6 +25,16 @@ const (
 	NetfilterReconcileArg     = "netfilter-reconcile"
 	NetfilterReconcileStopArg = "stop"
 
+	// NDMHookEnv is set by packaging/keenetic/netfilter.d/blacktemple-kn.sh.
+	// It only marks origin=ndm. It does not skip XKeen or lock safety checks
+	// and must never enable capture.enabled.
+	NDMHookEnv = "BTKN_NDM_HOOK"
+
+	// ProductionRouterMutationAck is the only accepted value of
+	// BTKN_PRODUCTION_ROUTER_MUTATION_ACK for future mutating hardware smoke.
+	ProductionRouterMutationAck    = "I_ACCEPT_NETWORK_LOSS"
+	ProductionRouterMutationAckEnv = "BTKN_PRODUCTION_ROUTER_MUTATION_ACK"
+
 	// KeeneticDenyFwmark is the policy drop mark observed on KN-1011
 	// (ip rule fwmark 0xffffaaa → table 4096 then blackhole). Capture must
 	// not grant internet Keenetic already denied.

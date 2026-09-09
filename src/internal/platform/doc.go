@@ -7,10 +7,12 @@ package platform
 // Installed: /opt/etc/ndm/netfilter.d/blacktemple-kn.sh
 // CLI argv for stream A: blacktempled netfilter-reconcile [stop]
 //
-// FAIL OPEN: Reconcile returns DecisionDesiredAbsent when the manager is missing,
-// xray is missing/dead, runtime state is invalid, config is corrupt, or the
-// network is not ready. DesiredAbsent means capture MUST BE ABSENT: the
+// FAIL OPEN: capture.enabled defaults to false. Reconcile returns
+// DecisionDesiredAbsent with reason capture-disabled unless the persisted
+// JSON boolean is true. After that, DesiredAbsent also when the manager is
+// missing, xray is missing/dead, runtime state is invalid, config is corrupt,
+// or the network is not ready. DesiredAbsent means capture MUST BE ABSENT: the
 // integrator must call D.Remove(). Manager-missing does not by itself delete
 // stale BTKN rules (the binary is gone). D owns BTKN_ Remove(); F does not
 // call iptables. Router self-generated traffic stays DIRECT: CaptureOUTPUT is
-// always false.
+// always false. Environment variables cannot enable capture.

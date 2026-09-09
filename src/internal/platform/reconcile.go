@@ -50,6 +50,11 @@ type ReconcileInput struct {
 	Network NetworkStatus
 	Alive   func() bool
 	Policy  KeeneticPolicy
+
+	// CaptureEnabled is the master switch. nil loads CaptureConfigPath
+	// (missing/corrupt = false). Production never treats env as true.
+	CaptureEnabled    *bool
+	CaptureConfigPath string
 }
 
 // ReconcileResult is the documented command contract for A/D.
@@ -72,11 +77,16 @@ func BTKNRemoveArgv(manager string) []string {
 
 // Reconcile decides whether capture may be installed. Default is fail-open.
 //
-// Fail-open (DecisionDesiredAbsent) when: manager missing, xray missing, xray
-// dead, runtime state invalid/corrupt, config corrupt, network not ready, or
-// a policy guard would grant Keenetic-denied internet. DesiredAbsent means
-// capture must be removed by D; it is not a no-op. Manager-missing cannot
-// itself delete stale BTKN (binary gone).
+// The master switch capture.enabled is checked first (after explicit Stop).
+// Missing/corrupt/false means DecisionDesiredAbsent with reason
+// capture-disabled. Xray alive, selected-client, NDM, and manager restart
+// cannot enable capture by themselves.
+//
+// After the switch is true, fail-open (DecisionDesiredAbsent) when: manager
+// missing, xray missing, xray dead, runtime state invalid/corrupt, config
+// corrupt, network not ready, or a policy guard would grant Keenetic-denied
+// internet. DesiredAbsent means capture must be removed by D; it is not a
+// no-op. Manager-missing cannot itself delete stale BTKN (binary gone).
 //
 // Stop also returns DecisionDesiredAbsent. Existing BTKN_ teardown is
 // D.Remove(); F does not call iptables.
@@ -102,6 +112,11 @@ func Reconcile(in ReconcileInput) ReconcileResult {
 	if in.Stop {
 		out.Decision = DecisionRemove
 		out.Reason = "stop"
+		return out
+	}
+
+	if !captureEnabled(in) {
+		out.Reason = ReasonCaptureDisabled
 		return out
 	}
 
@@ -177,6 +192,13 @@ func loadRuntimeState(in ReconcileInput) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func captureEnabled(in ReconcileInput) bool {
+	if in.CaptureEnabled != nil {
+		return *in.CaptureEnabled
+	}
+	return LoadCaptureEnabled(in.CaptureConfigPath)
 }
 
 func configValid(path string) bool {
