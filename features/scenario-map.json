@@ -710,6 +710,34 @@
       "priority": "P0",
       "tests": ["docs/hardware/scriptcheck_test.go::TestSmokeRequiresProductionRouterMutationAck"],
       "redProof": "RED: TestSmokeRequiresProductionRouterMutationAck FAIL until three mutation gates are required and not hardcoded"
+    },
+    "BTKN-LIFE-039": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/nflock_test.go::TestLockCreationFailureReturnsError",
+        "src/internal/platform/nfcmd_test.go::TestLockFailureDoesNotCallEngine"
+      ],
+      "redProof": "RED: lock tests FAIL while acquireNFLock fail-opens and ExecuteNetfilterReconcile ignores lock errors"
+    },
+    "BTKN-LIFE-040": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestStaleRescueWatcherCannotRecoverNewerRun"],
+      "redProof": "RED: TestStaleRescueWatcherCannotRecoverNewerRun FAIL while armed/disarm files are global"
+    },
+    "BTKN-LIFE-041": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestDisarmBDoesNotControlRunA"],
+      "redProof": "RED: TestDisarmBDoesNotControlRunA FAIL until disarm is per run_id"
+    },
+    "BTKN-LIFE-042": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestRecoverRequiresCurrentToken"],
+      "redProof": "RED: TestRecoverRequiresCurrentToken FAIL until recover rereads the current token"
+    },
+    "BTKN-LIFE-043": {
+      "priority": "P0",
+      "tests": ["docs/hardware/rescue_test.go::TestRescueSkipsXKeenStartWhenHealthy"],
+      "redProof": "RED: TestRescueSkipsXKeenStartWhenHealthy FAIL until ALREADY_HEALTHY skips S05xkeen start"
     }
   }
 }

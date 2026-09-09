@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -31,6 +32,8 @@ type NFCommand struct {
 	// Tests inject it. Production leaves it nil and loads data/config.json.
 	CaptureEnabled    *bool
 	CaptureConfigPath string
+	// AcquireLock, if set, replaces the process flock. Tests inject failures.
+	AcquireLock func(ctx context.Context, path string) (unlock func(), err error)
 }
 
 // ExecuteNetfilterReconcile is the manager entrypoint for NDM hook and stop/uninstall.
@@ -38,7 +41,18 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 	if cmd.Prefix == "" {
 		cmd.Prefix = PrefixDir
 	}
-	unlock, _ := acquireNFLock(ctx, netfilterLockPath(cmd.Prefix))
+	lockFn := cmd.AcquireLock
+	if lockFn == nil {
+		lockFn = acquireNFLock
+	}
+	unlock, err := lockFn(ctx, netfilterLockPath(cmd.Prefix))
+	if err != nil {
+		writeLockFailedDiag(cmd)
+		if errors.Is(err, ErrNetfilterLock) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrNetfilterLock, err)
+	}
 	if unlock != nil {
 		defer unlock()
 	}

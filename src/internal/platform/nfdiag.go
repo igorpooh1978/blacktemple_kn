@@ -3,6 +3,7 @@ package platform
 import (
 	"fmt"
 	"net/netip"
+	"os"
 	"strings"
 )
 
@@ -29,4 +30,18 @@ func formatReconcileDiag(origin, decision, reason, client, action, result string
 		"origin=%s capture_enabled=%t decision=%s reason=%s desired=%t client=%s our_xray_alive=%t action=%s result=%s",
 		origin, captureEnabled, decision, reason, desired, client, alive, action, result,
 	)
+}
+
+func writeLockFailedDiag(cmd NFCommand) {
+	fmt.Fprintln(os.Stderr, formatReconcileDiag(
+		ReconcileOrigin(),
+		string(DecisionDesiredAbsent),
+		ReasonLockFailed,
+		"MISSING",
+		"none",
+		"failure",
+		false,
+		false,
+		resolveCaptureEnabled(cmd),
+	))
 }

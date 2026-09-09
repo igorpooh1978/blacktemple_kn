@@ -20,7 +20,7 @@ BTKN_TABLE="4254"
 BTKN_PORT="11820"
 
 require_rescue() {
-	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.armed ]; then
+	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.current ]; then
 		echo "FAIL: rescue watchdog not armed"
 		return 1
 	fi
@@ -617,7 +617,7 @@ cmd_arm_rescue() {
 	fi
 	mkdir -p /opt/blacktemple-kn/run 2>/dev/null || true
 	sh "$_script" arm "r6i-$$" "${BTKN_RESCUE_DEADLINE_SEC:-90}"
-	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.armed ]; then
+	if [ ! -f /opt/blacktemple-kn/run/btkn-rescue.current ]; then
 		echo "FAIL: rescue not armed"
 		return 1
 	fi

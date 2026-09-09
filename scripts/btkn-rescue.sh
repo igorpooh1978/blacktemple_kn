@@ -3,16 +3,34 @@
 # Owned namespace only: BTKN_* / btkn_* / mark 0x42544b4e / table 4254 / OUR Xray.
 # Never global table flush, route/rule flush, indiscriminate process kill,
 # module unload, or XKeen object deletion.
+# Each watcher owns a run token. Stale watchers must not recover a newer run.
 
 RUN="${BTKN_RESCUE_DIR:-/opt/blacktemple-kn/run}"
-ARMED="$RUN/btkn-rescue.armed"
-DISARM="$RUN/btkn-rescue.disarm"
+CURRENT="$RUN/btkn-rescue.current"
 OUR_XRAY="/opt/blacktemple-kn/bin/xray"
-XKEEN_INIT="/opt/etc/init.d/S05xkeen"
+FOREIGN_XRAY="${BTKN_FOREIGN_XRAY:-/opt/sbin/xray}"
+XKEEN_INIT="${BTKN_XKEEN_INIT:-/opt/etc/init.d/S05xkeen}"
 MARK="0x42544b4e"
 TABLE="4254"
 
 mkdir -p "$RUN" 2>/dev/null || true
+
+armed_file() {
+	echo "$RUN/btkn-rescue.$1.armed"
+}
+
+disarm_file() {
+	echo "$RUN/btkn-rescue.$1.disarm"
+}
+
+read_current() {
+	cat "$CURRENT" 2>/dev/null || true
+}
+
+write_current() {
+	echo "$1" > "$CURRENT.tmp.$$"
+	mv "$CURRENT.tmp.$$" "$CURRENT"
+}
 
 have() {
 	command -v "$1" >/dev/null 2>&1
@@ -39,6 +57,27 @@ listen_port() {
 		return $?
 	fi
 	return 1
+}
+
+foreign_xray_alive() {
+	for _d in /proc/[0-9]*; do
+		[ -d "$_d" ] || continue
+		_exe=""
+		[ -L "${_d}/exe" ] && _exe=$(readlink "${_d}/exe" 2>/dev/null)
+		case "$_exe" in
+			"$FOREIGN_XRAY"|"${FOREIGN_XRAY} (deleted)")
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+xkeen_healthy() {
+	foreign_xray_alive || return 1
+	listen_port tcp 1181 || return 1
+	listen_port udp 1181 || return 1
+	return 0
 }
 
 detach_jump() {
@@ -78,6 +117,10 @@ stop_our_xray() {
 }
 
 restore_xkeen() {
+	if xkeen_healthy; then
+		echo "rescue_xkeen=ALREADY_HEALTHY"
+		return 0
+	fi
 	if [ -x "$XKEEN_INIT" ]; then
 		"$XKEEN_INIT" start 2>/dev/null || true
 	fi
@@ -95,8 +138,21 @@ restore_xkeen() {
 }
 
 cmd_recover() {
+	_id=$1
+	if [ -z "$_id" ]; then
+		_id=$(read_current)
+	fi
+	_cur=$(read_current)
+	if [ -z "$_id" ] || [ "$_cur" != "$_id" ]; then
+		echo "rescue_stale id=${_id} current=${_cur}"
+		return 0
+	fi
+	if [ -f "$(disarm_file "$_id")" ]; then
+		echo "rescue_disarmed id=${_id}"
+		return 0
+	fi
 	echo "===== RESCUE RECOVER ====="
-	echo "run_id=$(cat "$ARMED" 2>/dev/null || echo none)"
+	echo "run_id=${_id}"
 	detach_jump nat
 	detach_jump mangle
 	flush_owned_chain nat BTKN_TCP
@@ -128,47 +184,70 @@ cmd_arm() {
 	if [ -z "$_sec" ]; then
 		_sec=90
 	fi
-	echo "$_id" > "$ARMED"
-	rm -f "$DISARM"
+	echo "$_id" > "$(armed_file "$_id")"
+	rm -f "$(disarm_file "$_id")"
+	write_current "$_id"
 	echo "rescue_armed=${_id} deadline_sec=${_sec}"
 	if [ -n "$BTKN_RESCUE_FOREGROUND" ]; then
-		cmd_watch "$_sec"
+		cmd_watch "$_id" "$_sec"
 		return $?
 	fi
-	sh "$0" watch "$_sec" >/dev/null 2>&1 &
+	sh "$0" watch "$_id" "$_sec" >/dev/null 2>&1 &
 }
 
 cmd_watch() {
-	_sec=$1
+	_id=$1
+	_sec=$2
+	if [ -z "$_id" ]; then
+		echo "rescue_stale id= missing"
+		exit 0
+	fi
 	if [ -z "$_sec" ]; then
 		_sec=90
 	fi
 	_n=0
 	while [ "$_n" -lt "$_sec" ]; do
-		if [ -f "$DISARM" ]; then
-			echo "rescue_disarmed"
+		if [ -f "$(disarm_file "$_id")" ]; then
+			echo "rescue_disarmed id=${_id}"
+			exit 0
+		fi
+		_cur=$(read_current)
+		if [ "$_cur" != "$_id" ]; then
+			echo "rescue_stale id=${_id} current=${_cur}"
 			exit 0
 		fi
 		_n=$((_n + 1))
 		sleep 1
 	done
-	cmd_recover
+	cmd_recover "$_id"
 }
 
 cmd_disarm() {
-	echo "disarm" > "$DISARM"
-	rm -f "$ARMED"
-	echo "rescue_disarmed"
+	_id=$1
+	if [ -z "$_id" ]; then
+		_id=$(read_current)
+	fi
+	if [ -z "$_id" ]; then
+		echo "rescue_disarmed"
+		return 0
+	fi
+	echo "disarm" > "$(disarm_file "$_id")"
+	rm -f "$(armed_file "$_id")"
+	_cur=$(read_current)
+	if [ "$_cur" = "$_id" ]; then
+		rm -f "$CURRENT"
+	fi
+	echo "rescue_disarmed id=${_id}"
 }
 
 _cmd=$1
 case "$_cmd" in
 	arm) cmd_arm "$2" "$3" ;;
-	watch) cmd_watch "$2" ;;
-	disarm) cmd_disarm ;;
-	recover) cmd_recover ;;
+	watch) cmd_watch "$2" "$3" ;;
+	disarm) cmd_disarm "$2" ;;
+	recover) cmd_recover "$2" ;;
 	*)
-		echo "usage: btkn-rescue.sh {arm <run_id> <seconds>|watch <seconds>|disarm|recover}"
+		echo "usage: btkn-rescue.sh {arm <run_id> <seconds>|watch <run_id> <seconds>|disarm [run_id]|recover [run_id]}"
 		exit 1
 		;;
 esac

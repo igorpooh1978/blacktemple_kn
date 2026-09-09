@@ -4,6 +4,7 @@ package platform
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -12,13 +13,9 @@ import (
 
 func getenv(key string) string { return os.Getenv(key) }
 
-// acquireNFLock takes an exclusive flock with a bounded wait (context
-// deadline or NetfilterReconcileTimeout). It is released on unlock or
-// process exit. Failure to create the lock file is fail-open so unit tests
-// without /opt still run.
 func acquireNFLock(ctx context.Context, path string) (func(), error) {
 	if path == "" {
-		return func() {}, nil
+		return nil, fmt.Errorf("%w: empty path", ErrNetfilterLock)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -29,24 +26,29 @@ func acquireNFLock(ctx context.Context, path string) (func(), error) {
 		defer cancel()
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return func() {}, nil
+		return nil, fmt.Errorf("%w: mkdir: %v", ErrNetfilterLock, err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return func() {}, nil
+		return nil, fmt.Errorf("%w: open: %v", ErrNetfilterLock, err)
 	}
+	mu := pathMutex(path)
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-				_ = f.Close()
-			}, nil
+		if mu.TryLock() {
+			err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+			if err == nil {
+				return func() {
+					_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+					mu.Unlock()
+					_ = f.Close()
+				}, nil
+			}
+			mu.Unlock()
 		}
 		select {
 		case <-ctx.Done():
 			_ = f.Close()
-			return func() {}, ctx.Err()
+			return nil, fmt.Errorf("%w: %w", ErrNetfilterLock, ctx.Err())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

@@ -63,6 +63,7 @@ func TestNetfilterReconcileCLIWiresHybrid(t *testing.T) {
 	nfWriteJSON(t, cfg, `{"log":{}}`)
 	spy := &spyEngine{}
 	err := ExecuteNetfilterReconcile(context.Background(), NFCommand{
+		Prefix:      dir,
 		ManagerPath: mgr,
 		XrayPath:    xr,
 		ConfigPath:  cfg,
@@ -88,6 +89,7 @@ func TestNetfilterReconcileStopRemoves(t *testing.T) {
 	spy := &spyEngine{}
 	err := ExecuteNetfilterReconcile(context.Background(), NFCommand{
 		Stop:        true,
+		Prefix:      dir,
 		ManagerPath: mgr,
 		XrayPath:    xr,
 		Alive:       func() bool { return false },
@@ -111,6 +113,7 @@ func TestReconcileApplyRefusesXKeenWithZeroMutations(t *testing.T) {
 	nfWriteJSON(t, cfg, `{"inbounds":[]}`)
 	spy := &spyEngine{err: routing.ErrExistingCaptureEngine}
 	err := ExecuteNetfilterReconcile(context.Background(), NFCommand{
+		Prefix:         dir,
 		ManagerPath:    mgr,
 		XrayPath:       xr,
 		ConfigPath:     cfg,
@@ -138,6 +141,7 @@ func TestReconcileWithoutClientDoesNotApply(t *testing.T) {
 	nfWriteJSON(t, cfg, `{"inbounds":[]}`)
 	spy := &spyEngine{}
 	err := ExecuteNetfilterReconcile(context.Background(), NFCommand{
+		Prefix:         dir,
 		ManagerPath:    mgr,
 		XrayPath:       xr,
 		ConfigPath:     cfg,
@@ -435,5 +439,45 @@ func TestDisabledCaptureRemovesOwnedOnly(t *testing.T) {
 	}
 	if len(spy.reconcile) != 1 || spy.reconcile[0] {
 		t.Fatalf("disabled must RemoveOwned, got %v", spy.reconcile)
+	}
+}
+
+func TestLockFailureDoesNotCallEngine(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "run"), []byte("notdir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mgr := nfWriteExec(t, dir, "blacktempled")
+	xr := nfWriteExec(t, dir, "xray")
+	spy := &spyEngine{}
+	out := captureStderr(t, func() {
+		err := ExecuteNetfilterReconcile(context.Background(), NFCommand{
+			Prefix:         dir,
+			ManagerPath:    mgr,
+			XrayPath:       xr,
+			Alive:          func() bool { return true },
+			CaptureEnabled: captureOff(),
+			NewEngine: func(netip.Addr, routing.Executor) (routing.TrafficCaptureEngine, error) {
+				return spy, nil
+			},
+		})
+		if err == nil {
+			t.Error("lock failure must return an error")
+		}
+		if !errors.Is(err, ErrNetfilterLock) {
+			t.Errorf("want ErrNetfilterLock, got %v", err)
+		}
+	})
+	if len(spy.reconcile) != 0 {
+		t.Fatalf("engine Reconcile must not run without lock, got %v", spy.reconcile)
+	}
+	for _, tok := range []string{
+		"reason=lock-failed",
+		"result=failure",
+		"action=none",
+	} {
+		if !strings.Contains(out, tok) {
+			t.Fatalf("missing %s in %q", tok, out)
+		}
 	}
 }

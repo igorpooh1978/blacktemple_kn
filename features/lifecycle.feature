@@ -228,3 +228,36 @@ Feature: Service lifecycle
     Given router-smoke.ps1 and router-smoke-app.sh
     Then live mutation requires BTKN_ALLOW_ROUTING_MUTATION BTKN_ALLOW_XKEEN_STOP and BTKN_PRODUCTION_ROUTER_MUTATION_ACK
     And the harness does not hardcode those values
+
+  @BTKN-LIFE-039 @P0 @lifecycle
+  Scenario: Exclusive reconcile lock failure prevents all netfilter mutation
+    Given netfilter-reconcile cannot acquire run/netfilter-reconcile.lock
+    Then stderr reports reason=lock-failed result=failure
+    And Hybrid Reconcile is not invoked
+    And neither Apply nor Remove run
+
+  @BTKN-LIFE-040 @P0 @lifecycle
+  Scenario: Stale rescue watcher cannot recover a newer run
+    Given watcher A is armed
+    And a newer run B arms
+    Then watcher A must not recover
+
+  @BTKN-LIFE-041 @P0 @lifecycle
+  Scenario: Disarm for run B cannot control run A
+    Given run A and run B are distinct rescue tokens
+    When disarm B is requested
+    Then run A remains independently armed
+
+  @BTKN-LIFE-042 @P0 @lifecycle
+  Scenario: Only the current armed rescue token may execute recovery
+    Given a rescue recover invocation
+    Then recover rereads the current token
+    And recovery is skipped when the token does not match
+
+  @BTKN-LIFE-043 @P0 @lifecycle
+  Scenario: Rescue does not start XKeen when already healthy
+    Given /opt/sbin/xray is running
+    And TCP and UDP 1181 are listening
+    When rescue restore runs
+    Then it reports ALREADY_HEALTHY
+    And S05xkeen start is not invoked
