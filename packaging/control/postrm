@@ -1,4 +1,4 @@
 #!/bin/sh
-# Remove only our prefix rules when a later wave implements them.
-# Hello-service has no BTKN_ chains yet.
+# Files are already gone. BTKN cleanup is owned by prerm while blacktempled exists.
+# Do not flush foreign iptables. Do not stop XKeen.
 exit 0

@@ -3,4 +3,5 @@ mkdir -p /opt/blacktemple-kn/logs /opt/blacktemple-kn/run /opt/blacktemple-kn/co
 chmod 0755 /opt/blacktemple-kn/bin/blacktempled 2>/dev/null || true
 chmod 0755 /opt/blacktemple-kn/bin/xray 2>/dev/null || true
 chmod 0755 /opt/etc/init.d/S99blacktemple-kn 2>/dev/null || true
+chmod 0755 /opt/etc/ndm/netfilter.d/blacktemple-kn.sh 2>/dev/null || true
 exit 0

@@ -4,15 +4,14 @@
 #
 # Minimal fixed wrapper. No user strings. No env blobs.
 # FAIL-OPEN: if the manager is missing, exit 0 and do not install capture.
-# This does NOT delete stale BTKN rules. Package uninstall must clean owned
-# BTKN before removing the manager binary. CLI netfilter-reconcile is not
-# wired in this wave.
+# Package uninstall/stop must run blacktempled netfilter-reconcile stop
+# before removing the manager binary.
 # Absence of VPN is better than absence of internet.
 #
 # Router self-generated traffic stays DIRECT.
 # Capture apply/remove is owned by blacktempled netfilter-reconcile
-# (stream A wires the argv; stream D owns BTKN_ Remove/Apply).
-# When xray is dead the helper no-ops.
+# (HybridIptablesEngine). This hook contains no firewall policy.
+# Production daemon never stops XKeen.
 #
 BIN=/opt/blacktemple-kn/bin/blacktempled
 [ -x "$BIN" ] || exit 0

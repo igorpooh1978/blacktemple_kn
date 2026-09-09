@@ -48,3 +48,39 @@ Feature: Service lifecycle
     Given xray restart backoff
     When Reconcile runs
     Then capture is not applied
+
+  @BTKN-LIFE-009 @P0 @lifecycle
+  Scenario: netfilter-reconcile CLI drives Hybrid Reconcile
+    Given blacktempled netfilter-reconcile
+    When the manager CLI runs
+    Then HybridIptablesEngine.Reconcile is invoked
+    And the daemon does not stop XKeen
+
+  @BTKN-LIFE-010 @P0 @lifecycle
+  Scenario: netfilter-reconcile stop removes owned BTKN
+    Given stop argv
+    When netfilter-reconcile stop runs
+    Then desired capture is absent and RemoveOwned runs
+
+  @BTKN-LIFE-011 @P0 @lifecycle
+  Scenario: NDM hook delegates reconcile to the manager only
+    Given packaging/keenetic/netfilter.d/blacktemple-kn.sh
+    Then it execs blacktempled netfilter-reconcile
+    And it contains no iptables ip rule ip route or XKeen commands
+
+  @BTKN-LIFE-012 @P0 @lifecycle
+  Scenario: Package stop and uninstall clean BTKN before the manager disappears
+    Given S99 stop and packaging/control/prerm
+    Then netfilter-reconcile stop runs while blacktempled is still executable
+
+  @BTKN-LIFE-013 @P0 @lifecycle
+  Scenario: Manager restart removes owned capture then reconciles fresh
+    Given blacktempled restart
+    Then RemoveOwned runs before a new Apply
+    And duplicate BTKN jumps are not installed
+
+  @BTKN-LIFE-014 @P0 @lifecycle
+  Scenario: OUR Xray death fail-opens capture
+    Given BTKN capture active
+    When OUR Xray is stopped through the manager CLI
+    Then desired capture is absent and the selected client returns DIRECT

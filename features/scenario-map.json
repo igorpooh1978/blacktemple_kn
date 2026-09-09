@@ -471,8 +471,85 @@
     },
     "BTKN-TOOL-021": {
       "priority": "P0",
-      "tests": ["docs/hardware/scriptcheck_test.go::TestSmokeHarnessRequiresMutationGates"],
-      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+      "tests": [
+        "docs/hardware/scriptcheck_test.go::TestSmokeHarnessRequiresMutationGates",
+        "docs/hardware/scriptcheck_test.go::TestAppSmokeScriptNoFirewallMutation"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea; app smoke reuses dual gates"
+    },
+    "BTKN-TOOL-022": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestSmokeHarnessXkeenRestoreInFinally"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: finally restore already required on 03e9fea"
+    },
+    "BTKN-TOOL-023": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestXKeenRestoreFailureFailsGate"],
+      "redProof": "RED: TestXKeenRestoreFailureFailsGate FAIL until restore-xkeen non-zero is treated as gate FAIL; GREEN after"
+    },
+    "BTKN-TOOL-024": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/client_test.go::TestParseSelectedClient"],
+      "redProof": "RED: TestParseSelectedClient FAIL before ParseSelectedClient; GREEN after"
+    },
+    "BTKN-LIFE-009": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestNetfilterReconcileCLIWiresHybrid"],
+      "redProof": "RED: TestNetfilterReconcileCLIWiresHybrid FAIL before ExecuteNetfilterReconcile; GREEN after"
+    },
+    "BTKN-LIFE-010": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestNetfilterReconcileStopRemoves"],
+      "redProof": "RED: TestNetfilterReconcileStopRemoves FAIL before stop path; GREEN after"
+    },
+    "BTKN-LIFE-011": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/hook_test.go::TestNDMHookPresentAndStatic",
+        "src/internal/platform/hook_test.go::TestNDMHookNoUserStringInterpolation"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: hook already delegates; comments updated that CLI is wired"
+    },
+    "BTKN-LIFE-012": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/initscript_test.go::TestInitCleansCaptureBeforeStop",
+        "docs/hardware/probesafety_test.go::TestPrermCleansCaptureBeforeRemove"
+      ],
+      "redProof": "RED: init/prerm tests FAIL until netfilter-reconcile stop is invoked first; GREEN after"
+    },
+    "BTKN-LIFE-013": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeManagerRestartPath"],
+      "redProof": "RED: TestAppSmokeManagerRestartPath FAIL until restart-manager uses reconcile; GREEN after"
+    },
+    "BTKN-LIFE-014": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeFailOpenPath"],
+      "redProof": "RED: TestAppSmokeFailOpenPath FAIL until fail-open calls xray-stop then reconcile; GREEN after"
+    },
+    "BTKN-PKG-003": {
+      "priority": "P0",
+      "tests": ["docs/hardware/probesafety_test.go::TestBuildStagesNDMHook"],
+      "redProof": "RED: TestBuildStagesNDMHook FAIL before build.ps1 copies the hook; GREEN after"
+    },
+    "BTKN-XRAY-007": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/ourxray_test.go::TestForeignXrayIsNeverOurs",
+        "src/internal/routing/hybrid_test.go::TestForeignXrayOwnerCollision"
+      ],
+      "redProof": "RED: TestForeignXrayIsNeverOurs FAIL before IsOurXrayExecutable; GREEN after"
+    },
+    "BTKN-ROUT-018": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/nfcmd_test.go::TestReconcileApplyRefusesXKeenWithZeroMutations"],
+      "redProof": "RED: TestReconcileApplyRefusesXKeenWithZeroMutations FAIL before CLI Apply path; GREEN after"
+    },
+    "BTKN-ROUT-019": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeDoesNotMutateDNS"],
+      "redProof": "RED: TestAppSmokeDoesNotMutateDNS FAIL until app smoke forbids DNS mutation; GREEN after"
     }
   }
 }

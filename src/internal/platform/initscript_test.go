@@ -52,3 +52,26 @@ func TestInitScriptFailClosedAndEntware(t *testing.T) {
 		t.Fatal("must not use a fixed sleep 30 as the only wait")
 	}
 }
+
+func TestInitCleansCaptureBeforeStop(t *testing.T) {
+	p := filepath.Join("..", "..", "..", "packaging", "init", "S99blacktemple-kn")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	idxStop := strings.Index(text, `"$BIN" netfilter-reconcile stop`)
+	if idxStop < 0 {
+		t.Fatal("stop must invoke netfilter-reconcile stop while manager exists")
+	}
+	idxRc := strings.Index(text, ". /opt/etc/init.d/rc.func")
+	if idxRc < 0 {
+		t.Fatal("init must source rc.func")
+	}
+	if idxStop > idxRc {
+		t.Fatal("capture cleanup must run before rc.func stop")
+	}
+	if strings.Contains(text, "iptables") {
+		t.Fatal("init must not contain iptables; manager CLI owns cleanup")
+	}
+}

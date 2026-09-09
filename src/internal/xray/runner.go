@@ -13,6 +13,7 @@ import (
 // Runner talks to a pinned xray executable. It does not restart or back off.
 type Runner struct {
 	Executable string
+	Detach     bool
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -74,6 +75,9 @@ func (r *Runner) Start(ctx context.Context, configPath string) error {
 	cmd := exec.Command(r.Executable, "run", "-c", configPath)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	if r.Detach {
+		setDetached(cmd)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("xray start: %w", err)
 	}

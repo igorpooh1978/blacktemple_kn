@@ -46,6 +46,28 @@ func TestPackagingControlNoKernelModulesOrNode(t *testing.T) {
 	}
 }
 
+func TestBuildStagesNDMHook(t *testing.T) {
+	s := readRepoFile(t, "build.ps1")
+	if !strings.Contains(s, `ndm\netfilter.d`) && !strings.Contains(s, "ndm/netfilter.d") {
+		t.Fatal("build.ps1 must stage NDM netfilter hook")
+	}
+	if !strings.Contains(s, "blacktemple-kn.sh") {
+		t.Fatal("build.ps1 must copy blacktemple-kn.sh")
+	}
+}
+
+func TestPrermCleansCaptureBeforeRemove(t *testing.T) {
+	s := readRepoFile(t, "packaging", "control", "prerm")
+	idx := strings.Index(s, "netfilter-reconcile stop")
+	if idx < 0 {
+		t.Fatal("prerm must run netfilter-reconcile stop while manager exists")
+	}
+	idxInit := strings.Index(s, "S99blacktemple-kn")
+	if idxInit >= 0 && idx > idxInit {
+		t.Fatal("BTKN cleanup must happen before init stop removes the process")
+	}
+}
+
 func TestResearchLocalAndLogsGitignored(t *testing.T) {
 	s := readRepoFile(t, ".gitignore")
 	for _, want := range []string{".research-local/", "*.log"} {

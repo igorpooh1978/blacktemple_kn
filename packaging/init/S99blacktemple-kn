@@ -67,7 +67,16 @@ wait_network_ready() {
 	return 1
 }
 
-cmd=$1
+	cmd=$1
+
+case "$cmd" in
+	stop|restart)
+		# Clean owned capture while the manager binary still exists.
+		if [ -x "$BIN" ]; then
+			"$BIN" netfilter-reconcile stop >/dev/null 2>&1 || true
+		fi
+		;;
+esac
 
 case "$cmd" in
 	start|restart)

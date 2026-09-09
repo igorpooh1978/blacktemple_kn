@@ -86,4 +86,20 @@ Feature: Hardware tooling
   Scenario: Live routing smoke stays gated
     Given router-smoke.ps1
     Then mutation gates are required
-    And APP_SMOKE_NOT_WIRED remains the live-routing reason
+    And without both gates LIVE ROUTING SMOKE is NOT RUN
+
+  @BTKN-TOOL-022 @P0 @hardware
+  Scenario: App smoke restores XKeen on every exit path
+    Given router-smoke.ps1 finally
+    Then cleanup-btkn stop-blacktemple and restore-xkeen run
+
+  @BTKN-TOOL-023 @P0 @hardware
+  Scenario: XKeen restore failure fails the hardware gate
+    Given restore-xkeen
+    When XKeen lifecycle start fails
+    Then the smoke reports RESTORE_XKEEN FAIL
+
+  @BTKN-TOOL-024 @P0 @hardware
+  Scenario: Live capture client must be one RFC1918 host IPv4
+    Given SSH source or BTKN_TEST_CLIENT_IPV4
+    Then the address is a /32 LAN host and not the router
