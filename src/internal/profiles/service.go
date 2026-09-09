@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/atomicfile"
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/countries"
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/keys"
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/servers"
@@ -35,6 +37,14 @@ func (r ImportRequest) String() string {
 
 func (r ImportRequest) GoString() string { return r.String() }
 
+// Config wires a profile service. Empty DataDir keeps an in-memory store.
+type Config struct {
+	Client  *http.Client
+	Changer keys.KeyChanger
+	DataDir string
+	Writer  *atomicfile.Writer
+}
+
 type record struct {
 	profile Profile
 	sub     subscription.Subscription
@@ -42,32 +52,65 @@ type record struct {
 	servers []servers.Server
 }
 
-// Service is the in-memory profile/subscription/key lifecycle.
+// Service is the profile/subscription/key lifecycle with optional durable store.
 type Service struct {
-	mu       sync.Mutex
-	client   *http.Client
-	changer  keys.KeyChanger
-	catalog  *countries.Catalog
-	byID     map[string]*record
-	order    []string
-	activeID string
-	now      func() time.Time
+	mu             sync.Mutex
+	client         *http.Client
+	changer        keys.KeyChanger
+	catalog        *countries.Catalog
+	byID           map[string]*record
+	order          []string
+	activeID       string
+	now            func() time.Time
+	dataDir        string
+	storePath      string
+	writer         *atomicfile.Writer
+	persistBlocked bool
 }
 
 func NewService(client *http.Client, changer keys.KeyChanger) *Service {
-	if changer == nil {
-		changer = keys.UnconfiguredChanger{}
+	return New(Config{Client: client, Changer: changer})
+}
+
+func New(cfg Config) *Service {
+	if cfg.Changer == nil {
+		cfg.Changer = keys.UnconfiguredChanger{}
 	}
-	return &Service{
-		client:  client,
-		changer: changer,
-		catalog: countries.NewCatalog(),
-		byID:    map[string]*record{},
-		now:     func() time.Time { return time.Now().UTC() },
+	s := &Service{
+		client:    cfg.Client,
+		changer:   cfg.Changer,
+		catalog:   countries.NewCatalog(),
+		byID:      map[string]*record{},
+		now:       func() time.Time { return time.Now().UTC() },
+		dataDir:   cfg.DataDir,
+		writer:    cfg.Writer,
+		storePath: "",
 	}
+	if cfg.DataDir != "" {
+		s.storePath = filepath.Join(cfg.DataDir, storeFileName)
+		if err := s.loadFromDisk(); err != nil {
+			s.byID = map[string]*record{}
+			s.order = nil
+			s.activeID = ""
+			s.persistBlocked = true
+		}
+	}
+	return s
 }
 
 func (s *Service) Catalog() *countries.Catalog { return s.catalog }
+
+func (s *Service) StorePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storePathLocked()
+}
+
+func (s *Service) PersistBlocked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistBlocked
+}
 
 func (s *Service) List() []Profile {
 	s.mu.Lock()
@@ -96,13 +139,13 @@ func (s *Service) ActiveID() string {
 }
 
 func (s *Service) SetActive(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.byID[id]; !ok {
-		return ErrNotFound
-	}
-	s.activeID = id
-	return nil
+	return s.commit(func(m *memory) error {
+		if _, ok := m.byID[id]; !ok {
+			return ErrNotFound
+		}
+		m.activeID = id
+		return nil
+	})
 }
 
 func (s *Service) Keys(profileID string) ([]keys.Key, error) {
@@ -159,38 +202,43 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (Profile, error
 	if raw == "" {
 		return Profile{}, ErrEmptyImport
 	}
-	name := strings.TrimSpace(req.Name)
 	parsed, subMeta, err := s.load(ctx, raw)
 	if err != nil {
 		return Profile{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id := newID()
-	if name == "" {
-		name = "profile-" + id[:8]
-	}
-	subID := hashOrRandom(subMeta.kind, subMeta.sanitized)
-	sub := subscription.Subscription{
-		ID:          subID,
-		ProfileID:   id,
-		Kind:        subMeta.kind,
-		ContentType: subMeta.contentType,
-		Encoding:    parsed.Encoding,
-		EntryCount:  len(parsed.Entries),
-		FetchedAt:   s.now(),
-	}
-	sub = withSource(sub, subMeta.source)
-	ks, srvs := s.entities(id, subID, parsed.Entries)
-	st := keys.NewState(id, ks)
-	if len(ks) > 0 {
-		_, _ = st.SelectCandidate(ks[0].ID, ks[0].ServerID)
-	}
-	p := Profile{ID: id, Name: name, SubscriptionID: subID, CreatedAt: s.now()}
-	s.byID[id] = &record{profile: p, sub: sub, keys: st, servers: srvs}
-	s.order = append(s.order, id)
-	if s.activeID == "" {
-		s.activeID = id
+	var p Profile
+	err = s.commit(func(m *memory) error {
+		id := newID()
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = "profile-" + id[:8]
+		}
+		subID := hashOrRandom(subMeta.kind, subMeta.sanitized)
+		sub := subscription.Subscription{
+			ID:          subID,
+			ProfileID:   id,
+			Kind:        subMeta.kind,
+			ContentType: subMeta.contentType,
+			Encoding:    parsed.Encoding,
+			EntryCount:  len(parsed.Entries),
+			FetchedAt:   s.now(),
+		}
+		sub = withSource(sub, subMeta.source)
+		ks, srvs := s.entities(id, subID, parsed.Entries)
+		st := keys.NewState(id, ks)
+		if len(ks) > 0 {
+			_, _ = st.SelectCandidate(ks[0].ID, ks[0].ServerID)
+		}
+		p = Profile{ID: id, Name: name, SubscriptionID: subID, CreatedAt: s.now()}
+		m.byID[id] = &record{profile: p, sub: sub, keys: st, servers: srvs}
+		m.order = append(m.order, id)
+		if m.activeID == "" {
+			m.activeID = id
+		}
+		return nil
+	})
+	if err != nil {
+		return Profile{}, err
 	}
 	return p, nil
 }
@@ -213,114 +261,146 @@ func (s *Service) Refresh(ctx context.Context, profileID string) error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok = s.byID[profileID]
-	if !ok {
-		return ErrNotFound
-	}
-	ks, srvs := s.entities(profileID, rec.sub.ID, parsed.Entries)
-	prev, had := rec.keys.ActiveCandidate()
-	rec.keys.SetKeys(ks)
-	rec.servers = srvs
-	sub := rec.sub
-	sub.ContentType = subMeta.contentType
-	sub.Encoding = parsed.Encoding
-	sub.EntryCount = len(parsed.Entries)
-	sub.FetchedAt = s.now()
-	rec.sub = withSource(sub, src)
-	if had {
-		if _, err := rec.keys.SelectCandidate(prev.KeyID, prev.ServerID); err != nil && len(ks) > 0 {
+	return s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		ks, srvs := s.entities(profileID, rec.sub.ID, parsed.Entries)
+		prev, had := rec.keys.ActiveCandidate()
+		rec.keys.SetKeys(ks)
+		rec.servers = srvs
+		sub := rec.sub
+		sub.ContentType = subMeta.contentType
+		sub.Encoding = parsed.Encoding
+		sub.EntryCount = len(parsed.Entries)
+		sub.FetchedAt = s.now()
+		rec.sub = withSource(sub, src)
+		if had {
+			if _, err := rec.keys.SelectCandidate(prev.KeyID, prev.ServerID); err != nil && len(ks) > 0 {
+				_, _ = rec.keys.SelectCandidate(ks[0].ID, ks[0].ServerID)
+			}
+		} else if len(ks) > 0 {
 			_, _ = rec.keys.SelectCandidate(ks[0].ID, ks[0].ServerID)
 		}
-	} else if len(ks) > 0 {
-		_, _ = rec.keys.SelectCandidate(ks[0].ID, ks[0].ServerID)
-	}
-	return nil
+		return nil
+	})
 }
 
 func (s *Service) SelectCandidate(profileID, keyID, serverID string) (keys.ConnectionCandidate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	return rec.keys.SelectCandidate(keyID, serverID)
+	var out keys.ConnectionCandidate
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		c, err := rec.keys.SelectCandidate(keyID, serverID)
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
 }
 
 func (s *Service) ChangeServer(profileID, serverID string) (keys.ConnectionCandidate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	srv, err := findServer(rec.servers, serverID)
-	if err != nil {
-		return keys.ConnectionCandidate{}, err
-	}
-	active, ok := rec.keys.ActiveCandidate()
-	keyID := ""
-	if ok {
-		keyID = active.KeyID
-	} else if len(rec.keys.Keys) > 0 {
-		keyID = rec.keys.Keys[0].ID
-	}
-	if keyID == "" {
-		return keys.ConnectionCandidate{}, keys.ErrNotFound
-	}
-	return rec.keys.SelectCandidate(keyID, srv.ID)
+	var out keys.ConnectionCandidate
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		srv, err := findServer(rec.servers, serverID)
+		if err != nil {
+			return err
+		}
+		active, ok := rec.keys.ActiveCandidate()
+		keyID := ""
+		if ok {
+			keyID = active.KeyID
+		} else if len(rec.keys.Keys) > 0 {
+			keyID = rec.keys.Keys[0].ID
+		}
+		if keyID == "" {
+			return keys.ErrNotFound
+		}
+		c, err := rec.keys.SelectCandidate(keyID, srv.ID)
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
 }
 
 func (s *Service) SelectServerMode(profileID string, mode servers.Mode, manualID string) (keys.ConnectionCandidate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	prev := ""
-	if c, ok := rec.keys.ActiveCandidate(); ok {
-		prev = c.ServerID
-	}
-	srv, err := servers.Select(mode, rec.servers, manualID, prev)
-	if err != nil {
-		return keys.ConnectionCandidate{}, err
-	}
-	keyID := keyForServer(rec.keys.Keys, srv.ID)
-	if keyID == "" && len(rec.keys.Keys) > 0 {
-		keyID = rec.keys.Keys[0].ID
-	}
-	if keyID == "" {
-		return keys.ConnectionCandidate{}, keys.ErrNotFound
-	}
-	return rec.keys.SelectCandidate(keyID, srv.ID)
-}
-
-func (s *Service) Rotate(profileID string) (keys.ConnectionCandidate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	if len(rec.servers) > 1 {
+	var out keys.ConnectionCandidate
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
 		prev := ""
 		if c, ok := rec.keys.ActiveCandidate(); ok {
 			prev = c.ServerID
 		}
-		srv, err := servers.Select(servers.ModeRotate, rec.servers, "", prev)
+		srv, err := servers.Select(mode, rec.servers, manualID, prev)
 		if err != nil {
-			return keys.ConnectionCandidate{}, err
+			return err
 		}
 		keyID := keyForServer(rec.keys.Keys, srv.ID)
-		if keyID == "" {
-			return rec.keys.RotateKey()
+		if keyID == "" && len(rec.keys.Keys) > 0 {
+			keyID = rec.keys.Keys[0].ID
 		}
-		return rec.keys.SelectCandidate(keyID, srv.ID)
-	}
-	return rec.keys.RotateKey()
+		if keyID == "" {
+			return keys.ErrNotFound
+		}
+		c, err := rec.keys.SelectCandidate(keyID, srv.ID)
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) Rotate(profileID string) (keys.ConnectionCandidate, error) {
+	var out keys.ConnectionCandidate
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		var c keys.ConnectionCandidate
+		var err error
+		if len(rec.servers) > 1 {
+			prev := ""
+			if active, ok := rec.keys.ActiveCandidate(); ok {
+				prev = active.ServerID
+			}
+			srv, selErr := servers.Select(servers.ModeRotate, rec.servers, "", prev)
+			if selErr != nil {
+				return selErr
+			}
+			keyID := keyForServer(rec.keys.Keys, srv.ID)
+			if keyID == "" {
+				c, err = rec.keys.RotateKey()
+			} else {
+				c, err = rec.keys.SelectCandidate(keyID, srv.ID)
+			}
+		} else {
+			c, err = rec.keys.RotateKey()
+		}
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
 }
 
 func (s *Service) ChangeKey(ctx context.Context, profileID, keyID string) (keys.ConnectionCandidate, error) {
@@ -343,44 +423,71 @@ func (s *Service) ChangeKey(ctx context.Context, profileID, keyID string) (keys.
 	}
 	parsed, err := subscription.Parse([]byte(strings.TrimSpace(resp.ShareURI())))
 	if err != nil {
-		return keys.ConnectionCandidate{}, err
+		return keys.ConnectionCandidate{}, subscription.ClassifyParse(err)
 	}
 	if len(parsed.Entries) == 0 {
-		return keys.ConnectionCandidate{}, subscription.ErrEmpty
+		return keys.ConnectionCandidate{}, subscription.ClassifyParse(subscription.ErrEmpty)
+	}
+	if !strings.EqualFold(parsed.Entries[0].Protocol, "vless") {
+		return keys.ConnectionCandidate{}, ErrUnsupportedProtocol
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok = s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	ks, srvs := s.entities(profileID, rec.sub.ID, parsed.Entries[:1])
-	if len(ks) == 0 {
-		return keys.ConnectionCandidate{}, subscription.ErrEmpty
-	}
-	rec.servers = mergeServers(rec.servers, srvs)
-	return rec.keys.ReplaceKey(keyID, ks[0])
+	var out keys.ConnectionCandidate
+	err = s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		if _, ok := rec.keys.Key(keyID); !ok {
+			return keys.ErrNotFound
+		}
+		ks, srvs := s.entities(profileID, rec.sub.ID, parsed.Entries[:1])
+		if len(ks) == 0 {
+			return subscription.ClassifyParse(subscription.ErrEmpty)
+		}
+		rec.servers = mergeServers(rec.servers, srvs)
+		c, err := rec.keys.ReplaceKey(keyID, ks[0])
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
 }
 
 func (s *Service) CommitLastKnownGood(profileID string) (keys.LastKnownGood, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.LastKnownGood{}, ErrNotFound
-	}
-	return rec.keys.CommitGood(s.now())
+	var out keys.LastKnownGood
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		lkg, err := rec.keys.CommitGood(s.now())
+		if err != nil {
+			return err
+		}
+		out = lkg
+		return nil
+	})
+	return out, err
 }
 
 func (s *Service) Rollback(profileID string) (keys.ConnectionCandidate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byID[profileID]
-	if !ok {
-		return keys.ConnectionCandidate{}, ErrNotFound
-	}
-	return rec.keys.Rollback()
+	var out keys.ConnectionCandidate
+	err := s.commit(func(m *memory) error {
+		rec, ok := m.byID[profileID]
+		if !ok {
+			return ErrNotFound
+		}
+		c, err := rec.keys.Rollback()
+		if err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
 }
 
 type loadedMeta struct {
@@ -399,7 +506,7 @@ func (s *Service) load(ctx context.Context, raw string) (subscription.Result, lo
 		}
 		parsed, err := subscription.Parse(fetched.Body)
 		if err != nil {
-			return subscription.Result{}, loadedMeta{}, err
+			return subscription.Result{}, loadedMeta{}, subscription.ClassifyParse(err)
 		}
 		return parsed, loadedMeta{
 			kind:        "url",
@@ -410,7 +517,7 @@ func (s *Service) load(ctx context.Context, raw string) (subscription.Result, lo
 	}
 	parsed, err := subscription.Parse([]byte(raw))
 	if err != nil {
-		return subscription.Result{}, loadedMeta{}, err
+		return subscription.Result{}, loadedMeta{}, subscription.ClassifyParse(err)
 	}
 	kind := "share"
 	if parsed.Format == "json-uri-array" || parsed.Format == "json-outbound" || parsed.Format == "json-vmess" {

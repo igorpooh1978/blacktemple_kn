@@ -738,6 +738,172 @@
       "priority": "P0",
       "tests": ["docs/hardware/rescue_test.go::TestRescueSkipsXKeenStartWhenHealthy"],
       "redProof": "RED: TestRescueSkipsXKeenStartWhenHealthy FAIL until ALREADY_HEALTHY skips S05xkeen start"
+    },
+    "BTKN-LIFE-044": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/initscript_test.go::TestInitScriptAbsoluteDataDir"],
+      "redProof": "RED: TestInitScriptAbsoluteDataDir FAIL until S99 passes -data-dir /opt/blacktemple-kn/data"
+    },
+    "BTKN-AUTH-001": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/api/authstate_test.go::TestAuthStateFreshSetup",
+        "src/internal/api/authstate_test.go::TestAuthStateLoginAndSession"
+      ],
+      "redProof": "RED: GET /api/v1/auth/state 404 on 7d8c1fa; GREEN after handler"
+    },
+    "BTKN-AUTH-002": {
+      "priority": "P0",
+      "tests": ["src/internal/api/authstate_test.go::TestAuthStateAfterNewAuthService"],
+      "redProof": "RED: TestAuthStateAfterNewAuthService FAIL until RAM sessions are not durable"
+    },
+    "BTKN-AUTH-003": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestSessionExpiryHTTP"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: protected 401 already returned; UI maps it to LOGIN"
+    },
+    "BTKN-PROF-008": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestHTTPSImportParse"],
+      "redProof": "RED: TestHTTPSImportParse FAIL before classified HTTPS import; GREEN after"
+    },
+    "BTKN-PROF-009": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestFailedFetchDoesNotCreateProfile"],
+      "redProof": "RED: TestFailedFetchDoesNotCreateProfile FAIL if Import stored a profile on fetch error"
+    },
+    "BTKN-PROF-010": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestImportPersistsAndRestoresWithoutProvider"],
+      "redProof": "RED: TestImportPersistsAndRestoresWithoutProvider FAIL while Service is memory-only"
+    },
+    "BTKN-PROF-011": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestImportPersistsAndRestoresWithoutProvider"],
+      "redProof": "RED: active profile lost across New() before durable store"
+    },
+    "BTKN-PROF-012": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestImportPersistsAndRestoresWithoutProvider"],
+      "redProof": "RED: keys/servers missing after recreate before persist"
+    },
+    "BTKN-PROF-013": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestImportPersistsAndRestoresWithoutProvider"],
+      "redProof": "RED: candidate missing after recreate before persist"
+    },
+    "BTKN-PROF-014": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestImportPersistsAndRestoresWithoutProvider"],
+      "redProof": "RED: profiles.json mode not 0600 before atomic persist"
+    },
+    "BTKN-PROF-015": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/profiles/persist_test.go::TestSecretAbsentFromAPIShape",
+        "src/internal/profiles/service_test.go::TestRedactionLogs"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: leaking a secret would be an unsafe RED mutation"
+    },
+    "BTKN-PROF-016": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestPersistFailureLeavesGoodState"],
+      "redProof": "RED: TestPersistFailureLeavesGoodState FAIL until persist-then-publish"
+    },
+    "BTKN-CONN-007": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSOnlyConnectOmitsTransparentInbounds"],
+      "redProof": "RED: TestSOCKSOnlyConnectOmitsTransparentInbounds FAIL if redirect-in is generated"
+    },
+    "BTKN-CONN-008": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSConnectLeavesCaptureDisabled"],
+      "redProof": "RED: TestSOCKSConnectLeavesCaptureDisabled FAIL if connect writes capture.enabled"
+    },
+    "BTKN-CONN-009": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSConnectSourcesNeverApplyNetfilter"],
+      "redProof": "RED: TestSOCKSConnectSourcesNeverApplyNetfilter FAIL if connection sources call Apply"
+    },
+    "BTKN-CONN-010": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSConnectSourcesNeverApplyNetfilter"],
+      "redProof": "RED: connection sources must not contain S05xkeen"
+    },
+    "BTKN-CONN-011": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSGeneratedConfigXrayTest"],
+      "redProof": "RED: TestSOCKSGeneratedConfigXrayTest FAIL/skip until SOCKS-only config is generated; live binary optional"
+    },
+    "BTKN-KEYS-001": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyUsesAdapterNotRefresh"],
+      "redProof": "RED: TestChangeKeyUsesAdapterNotRefresh FAIL if ChangeKey fetches the subscription URL"
+    },
+    "BTKN-KEYS-002": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyUsesAdapterNotRefresh"],
+      "redProof": "RED: replacement must keep a single key"
+    },
+    "BTKN-KEYS-003": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestParseClassifiesReplacement"],
+      "redProof": "RED: TestParseClassifiesReplacement FAIL if parser rejects the replacement share"
+    },
+    "BTKN-KEYS-004": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyPersistsBeforeReload"],
+      "redProof": "RED: TestChangeKeyPersistsBeforeReload FAIL while ChangeKey is memory-only"
+    },
+    "BTKN-KEYS-005": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyPersistFailureLeavesOld"],
+      "redProof": "RED: TestChangeKeyPersistFailureLeavesOld FAIL until persist-then-publish"
+    },
+    "BTKN-KEYS-006": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyProviderFailureLeavesOld"],
+      "redProof": "RED: TestChangeKeyProviderFailureLeavesOld FAIL if UnconfiguredChanger mutates keys"
+    },
+    "BTKN-KEYS-007": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyInvalidShareLeavesOld"],
+      "redProof": "RED: TestChangeKeyInvalidShareLeavesOld FAIL if invalid share replaces the key"
+    },
+    "BTKN-KEYS-008": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyUnsupportedProtocolLeavesOld"],
+      "redProof": "RED: TestChangeKeyUnsupportedProtocolLeavesOld FAIL until VLESS-only replacement"
+    },
+    "BTKN-KEYS-009": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeySecretNotInErrors"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: leaking a regenerated secret would be an unsafe RED mutation"
+    },
+    "BTKN-KEYS-010": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyPersistsBeforeReload"],
+      "redProof": "RED: regenerated key missing after New() before persist"
+    },
+    "BTKN-KEYS-011": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeyPersistsBeforeReload"],
+      "redProof": "RED: active candidate not preserved on the new key"
+    },
+    "BTKN-KEYS-012": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/persist_test.go::TestChangeKeySourcesNeverTouchNetfilter"],
+      "redProof": "RED: TestChangeKeySourcesNeverTouchNetfilter FAIL if profiles/keys call netfilter"
+    },
+    "BTKN-KEYS-013": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestSuccessfulChangeKeyLeavesSOCKSRunning"],
+      "redProof": "RED: TestSuccessfulChangeKeyLeavesSOCKSRunning FAIL if ChangeKey stops Xray"
+    },
+    "BTKN-KEYS-014": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/socks_only_test.go::TestChangeKeyDoesNotStopRunningSOCKS"],
+      "redProof": "RED: TestChangeKeyDoesNotStopRunningSOCKS FAIL if failed ChangeKey stops Xray"
     }
   }
 }

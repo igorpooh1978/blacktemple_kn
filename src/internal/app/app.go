@@ -3,6 +3,7 @@ package app
 import (
 	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -71,7 +72,10 @@ func New(cfg Config) (*App, error) {
 	conn := cfg.Connection
 	prof := cfg.Profiles
 	if status == nil || conn == nil || prof == nil {
-		ps := profiles.NewService(nil, nil)
+		ps := profiles.New(profiles.Config{
+			Client:  &http.Client{Timeout: 20 * time.Second},
+			DataDir: cfg.DataDir,
+		})
 		xrayPath := cfg.XrayExecutable
 		if xrayPath == "" {
 			xrayPath = lookupXrayExecutable(cfg.DataDir)

@@ -74,20 +74,17 @@ export function App() {
     (async () => {
       try {
         const authRes = await getAuthState();
-        if (!cancelled && authRes.status === 200) {
-          const state = parseAuthState(await readJson(authRes));
-          if (state) {
-            const next = screenFromAuthState(state);
-            setScreen(next);
-            if (next === "main") {
-              await loadStatus();
-            }
-            return;
-          }
+        if (cancelled || authRes.status !== 200) {
+          return;
         }
-        const ok = await loadStatus();
-        if (!cancelled && ok) {
-          setScreen("main");
+        const state = parseAuthState(await readJson(authRes));
+        if (!state || cancelled) {
+          return;
+        }
+        const next = screenFromAuthState(state);
+        setScreen(next);
+        if (next === "main") {
+          await loadStatus();
         }
       } catch {
         /* daemon unreachable — stay on first-run */

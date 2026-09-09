@@ -36,3 +36,33 @@ Feature: Connection
     Given the current R6 connection contract
     When restart-manager or full-restart is requested
     Then ErrUnsupportedInEnvironment is returned
+
+  @BTKN-CONN-007 @P0 @connection
+  Scenario: SOCKS-only connect generates exactly SOCKS inbound
+    Given a VLESS profile
+    When connect runs
+    Then generated xray.json has socks-in on 127.0.0.1:11080
+    And it has no redirect-in tproxy-in 11820 or transparentListen
+
+  @BTKN-CONN-008 @P0 @connection
+  Scenario: capture.enabled remains false during SOCKS connect
+    Given capture.enabled is false
+    When connect runs
+    Then capture.enabled stays false
+
+  @BTKN-CONN-009 @P0 @connection
+  Scenario: SOCKS-only connect never calls netfilter-reconcile Apply
+    Given the connection service sources
+    When connect is implemented
+    Then ExecuteNetfilterReconcile Apply is not called
+
+  @BTKN-CONN-010 @P0 @connection
+  Scenario: XKeen remains untouched while OUR SOCKS Xray starts and stops
+    Given SOCKS connect and disconnect
+    Then production sources do not stop S05xkeen or mutate ip rule
+
+  @BTKN-CONN-011 @P0 @connection
+  Scenario: SOCKS-only generated config is accepted by xray run -test
+    Given a VLESS Reality or TLS candidate
+    When SOCKS-only xray.json is generated
+    Then xray run -test accepts it where the binary is available

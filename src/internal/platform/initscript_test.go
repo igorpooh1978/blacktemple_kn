@@ -74,6 +74,21 @@ func TestInitScriptAutoLANBind(t *testing.T) {
 	}
 }
 
+func TestInitScriptAbsoluteDataDir(t *testing.T) {
+	p := filepath.Join("..", "..", "..", "packaging", "init", "S99blacktemple-kn")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, `-data-dir /opt/blacktemple-kn/data`) {
+		t.Fatal("init must pass absolute -data-dir /opt/blacktemple-kn/data")
+	}
+	if !strings.Contains(text, `"$PREFIX/data"`) {
+		t.Fatal("init must create the canonical data directory")
+	}
+}
+
 func TestInitCleansCaptureBeforeStop(t *testing.T) {
 	p := filepath.Join("..", "..", "..", "packaging", "init", "S99blacktemple-kn")
 	b, err := os.ReadFile(p)

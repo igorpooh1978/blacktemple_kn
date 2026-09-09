@@ -60,13 +60,24 @@ func codeImport(err error) error {
 	if errors.As(err, &existing) {
 		return err
 	}
+	type publicer interface {
+		HTTPStatus() int
+		PublicMessage() string
+	}
+	var pe publicer
+	if errors.As(err, &pe) && pe.HTTPStatus() > 0 {
+		return err
+	}
 	switch {
 	case errors.Is(err, profiles.ErrEmptyImport),
 		errors.Is(err, subscription.ErrEmpty),
 		errors.Is(err, subscription.ErrMalformed),
 		errors.Is(err, subscription.ErrUnknownJSON),
-		errors.Is(err, subscription.ErrUnsupportedURL):
-		return &codedError{status: http.StatusBadRequest, msg: "invalid request", cause: err}
+		errors.Is(err, subscription.ErrUnsupportedURL),
+		errors.Is(err, profiles.ErrUnsupportedProtocol):
+		return &codedError{status: http.StatusBadRequest, msg: "Ключ или подписка имеют неизвестный формат.", cause: err}
+	case errors.Is(err, subscription.ErrBodyTooLarge):
+		return &codedError{status: http.StatusRequestEntityTooLarge, msg: "Подписка слишком большая.", cause: err}
 	default:
 		return &codedError{status: http.StatusInternalServerError, msg: "import failed", cause: err}
 	}

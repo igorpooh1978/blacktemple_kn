@@ -41,6 +41,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
+  /api/v1/auth/state:
+    get:
+      operationId: authState
+      responses:
+        "200":
+          description: public setup/login routing flags; no secrets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthState"
   /api/v1/auth/setup:
     post:
       operationId: firstRunSetup
@@ -118,6 +128,12 @@ components:
       properties:
         ok:
           type: boolean
+    AuthState:
+      type: object
+      required: [initialized, authenticated]
+      properties:
+        initialized: { type: boolean }
+        authenticated: { type: boolean }
     Version:
       type: object
       required: [version, goos, goarch, gomips, cgo]

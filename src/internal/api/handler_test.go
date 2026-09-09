@@ -39,7 +39,11 @@ func (stubStatus) Status() api.Status {
 
 func newServer(t *testing.T, ttl time.Duration) (*api.Server, *auth.Service, string) {
 	t.Helper()
-	dir := t.TempDir()
+	return newServerFromDir(t, t.TempDir(), ttl)
+}
+
+func newServerFromDir(t *testing.T, dir string, ttl time.Duration) (*api.Server, *auth.Service, string) {
+	t.Helper()
 	svc, err := auth.New(auth.Config{DataDir: dir, Iterations: 20000, SessionTTL: ttl})
 	if err != nil {
 		t.Fatal(err)

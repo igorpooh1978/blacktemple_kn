@@ -54,19 +54,20 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string) (Fetched, er
 	req.Header.Set("Accept", "text/plain, application/json, */*")
 	resp, err := client.Do(req)
 	if err != nil {
-		return Fetched{}, errors.New("subscription fetch failed")
+		return Fetched{}, classifyDoError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Fetched{}, errors.New("subscription fetch HTTP " + itoa(resp.StatusCode))
+		_, _ = io.CopyN(io.Discard, resp.Body, 4096)
+		return Fetched{}, classifyHTTPStatus(resp.StatusCode)
 	}
 	limited := io.LimitReader(resp.Body, maxBodyBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return Fetched{}, err
+		return Fetched{}, classifyReadError(err)
 	}
 	if len(body) > maxBodyBytes {
-		return Fetched{}, ErrBodyTooLarge
+		return Fetched{}, ClassifyParse(ErrBodyTooLarge)
 	}
 	ct := resp.Header.Get("Content-Type")
 	if i := strings.Index(ct, ";"); i >= 0 {

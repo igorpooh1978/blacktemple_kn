@@ -186,13 +186,14 @@ describe("main connection hero", () => {
     expect(findButton("Подключить").disabled).toBe(false);
   });
 
-  it("reaches the main screen from GET /status when auth/state is unavailable", async () => {
+  it("does not treat public GET /status as an authenticated session", async () => {
     stubApi({
       auth: null,
       statusBody: disconnectedStatus(),
     });
     mount();
-    await see("VPN отключён");
+    await see("Первичная настройка");
+    expect(root.textContent).not.toContain("VPN отключён");
   });
 
   it("disables the connect action while connecting", async () => {
