@@ -39,7 +39,7 @@ func dispatch(args []string) error {
 
 	fs := flag.NewFlagSet("blacktempled", flag.ContinueOnError)
 	listen := fs.String("listen", "127.0.0.1:7480", "HTTP listen address (host used in explicit mode; port used in all modes)")
-	listenMode := fs.String("listen-mode", "loopback", "listen mode: loopback | auto-lan | explicit")
+	listenMode := fs.String("listen-mode", "auto-lan", "listen mode: loopback | auto-lan | explicit")
 	dataDir := fs.String("data-dir", "data", "local data directory for auth hash and runtime files")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -51,6 +51,7 @@ func dispatch(args []string) error {
 		DataDir:    *dataDir,
 		Version:    version,
 		UI:         uiFS(),
+		LAN:        platform.BridgeLAN{},
 	})
 	if err != nil {
 		return err

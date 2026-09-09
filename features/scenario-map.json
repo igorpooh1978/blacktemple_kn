@@ -533,6 +533,14 @@
       "tests": ["docs/hardware/scriptcheck_test.go::TestAppSmokeFailOpenPath"],
       "redProof": "RED: TestAppSmokeFailOpenPath FAIL until fail-open calls xray-stop then reconcile; GREEN after"
     },
+    "BTKN-LIFE-015": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/initscript_test.go::TestInitScriptAutoLANBind",
+        "src/internal/platform/lanbind_test.go::TestLANBindPrefersBr0PrivateNotWAN"
+      ],
+      "redProof": "RED: TestInitScriptAutoLANBind FAIL while S99 binds 127.0.0.1 only; GREEN after auto-lan on br0 RFC1918"
+    },
     "BTKN-PKG-003": {
       "priority": "P0",
       "tests": ["docs/hardware/probesafety_test.go::TestBuildStagesNDMHook"],

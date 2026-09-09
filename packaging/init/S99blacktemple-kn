@@ -5,8 +5,9 @@
 
 ENABLED=yes
 PROCS=blacktempled
-# FAIL CLOSED: loopback only. LAN bind is a later daemon flag, not all-interfaces.
-ARGS="-listen 127.0.0.1:7480"
+# HTTP UI on LAN DHCP gateway (br0 RFC1918 via auto-lan). Not WAN, not all-interfaces.
+# -listen supplies the port; loopback host is only the no-bridge fallback.
+ARGS="-listen-mode auto-lan -listen 127.0.0.1:7480"
 PREARGS=""
 DESC="blacktemple-kn"
 PREFIX=/opt/blacktemple-kn

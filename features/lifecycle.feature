@@ -84,3 +84,10 @@ Feature: Service lifecycle
     Given BTKN capture active
     When OUR Xray is stopped through the manager CLI
     Then desired capture is absent and the selected client returns DIRECT
+
+  @BTKN-LIFE-015 @P0 @lifecycle
+  Scenario: HTTP UI binds the LAN DHCP address not loopback or WAN
+    Given S99blacktemple-kn and auto-lan
+    Then the manager listens on br0 RFC1918
+    And it does not bind 0.0.0.0 or WAN
+    And loopback is only the fallback when no LAN bridge IP exists
