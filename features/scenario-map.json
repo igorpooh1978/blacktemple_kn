@@ -1,0 +1,478 @@
+{
+  "schemaVersion": 1,
+  "scenarios": {
+    "BTKN-PROF-001": {
+      "priority": "P0",
+      "tests": ["src/internal/keys/manager_test.go::TestStateSelectRotateRollback"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mutating key rollback would require committing a broken selector; covered by existing fail-closed tests"
+    },
+    "BTKN-PROF-002": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/service_test.go::TestImportEmptyAndMalformed"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea; R6-G did not mutate production to re-prove parse rejection"
+    },
+    "BTKN-PROF-003": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/service_test.go::TestImportSubscriptionURL"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea; never use a real BlackKey, only <BLACKKEY_SUBSCRIPTION_URL> / httptest"
+    },
+    "BTKN-PROF-004": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/profiles/service_test.go::TestRedactionLogs",
+        "src/internal/subscription/parse_test.go::TestSecretRedaction"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea; leaking a secret into logs would be an unsafe RED mutation"
+    },
+    "BTKN-PROF-005": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/service_test.go::TestImportShareAndLifecycle"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-PROF-006": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/service_test.go::TestProfileDeleteNotImplemented"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: contract is absence of Delete; adding a method would change the API rather than prove a fail-closed path"
+    },
+    "BTKN-PROF-007": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/service_test.go::TestRefreshFailurePreservesKeys"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: Refresh already returns before SetKeys on load error; mutating that order would be an uncommitted production defect"
+    },
+    "BTKN-CONN-001": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestSecretNotInStatusOrErrors"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-CONN-002": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestImportAndConnectDisconnect"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-CONN-003": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestRestartVPNChangesPID"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-CONN-004": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestValidationFailureLeavesOldConfig"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-CONN-005": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestStartFailureRestoresBackup"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-CONN-006": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestManagerRestartUnsupported"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: current contract returns ErrUnsupportedInEnvironment; fabricating manager-restart would misrepresent R6"
+    },
+    "BTKN-XRAY-001": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/generate_test.go::TestGoldenConfigs"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-XRAY-002": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/generate_test.go::TestTransparentTCPAndUDPInbound"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-XRAY-003": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/generate_test.go::TestDirect11820IsNotForwardProxy"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-XRAY-004": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/xray/generate_test.go::TestTransparentTCPAndUDPInbound",
+        "src/internal/xray/transparent_test.go::TestStartTransparentRejectsXKeenPort"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-XRAY-005": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/generate_test.go::TestInvalidTransparentConfig"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-XRAY-006": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/redact_test.go::TestRedactSecrets"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-001": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestUDPTProxyPlan"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-002": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestExpectedXrayOwnerNotCollision"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-003": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestForeignXrayOwnerCollision"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-004": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestPreflightToolFailure"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-005": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestFailOpenIncomplete"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-006": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestPartialApplyRollback"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-007": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestReconcileFromCleanSystem"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-008": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestReconcileManagerRestart"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-031": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestIsAbsentObjectFailureRealisticExitError",
+        "src/internal/routing/hybrid_test.go::TestRemovePermissionDeniedIsIncomplete",
+        "src/internal/routing/hybrid_test.go::TestDoubleRemove"
+      ],
+      "redProof": "temporary err-only classifier; TestIsAbsentObjectFailureRealisticExitError FAIL; restored before commit"
+    },
+    "BTKN-ROUT-009": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestSelectedClientOnly"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-010": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestCapturePrivateDirectExclude"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-011": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestTCPRedirectPlan"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-012": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenCollision"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-013": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestMarkTableCollision"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-014": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXrayOutboundNotRecaptured"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-015": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestNoGlobalFlush",
+        "src/internal/routing/hybrid_test.go::TestNoForeignChainMutation"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-016": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestIPv6CaptureUnverified"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ROUT-017": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestPartialApplyRollbackJoinsCleanupError"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-001": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestXKeenNotRequiredForHybridReady"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-002": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestPrepareDoesNotApplyCapture"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-003": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/keenetic/engine_test.go::TestValidateModulePath",
+        "src/internal/platform/keenetic/engine_test.go::TestLoadAllowlistedRejectsSymlink",
+        "src/internal/platform/keenetic/engine_test.go::TestLoadAllowlistedRejectsNonRegular"
+      ],
+      "redProof": "temporary HasPrefix(root) without slash boundary; TestValidateModulePath FAIL on /lib/modules-evil; restored before commit"
+    },
+    "BTKN-KEEN-004": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestPrepareFailsWhenInsmodOrderUnverified"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-005": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestXKeenDoesNotSubstituteTPROXY"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-006": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestTUNIsCandidateNotReady"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-007": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestRequirementsComeFromRouting"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-KEEN-008": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestDetectReportsHybridPrepareRequired"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: Detect already returns HYBRID_PREPARE_REQUIRED on this fixture; mutating SelectEngine would mis-label engines"
+    },
+    "BTKN-KEEN-009": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestDetectNoUsableEngine"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: empty-runner Detect already returns NO_USABLE_ENGINE"
+    },
+    "BTKN-KEEN-010": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/keenetic/engine_test.go::TestPrepareSuccessDoesNotMutateSysctlOrPackages"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: Prepare already issues no sysctl/opkg/insmod on HYBRID_READY"
+    },
+    "BTKN-LIFE-001": {
+      "priority": "P0",
+      "tests": ["src/internal/supervisor/supervisor_test.go::TestCanTransition"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-002": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileXrayDeadNoCapture"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-003": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileNetworkNotReadyNoCapture"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-004": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileXrayMissingNoCapture"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-005": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/network_test.go::TestWaitNetworkReadyTimesOutWhenNotReady"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-006": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileReadyDoesNotCaptureOUTPUTOrCallIptables"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-007": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileConfigCorruptNoCapture"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIFE-008": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/reconcile_test.go::TestReconcileBackoffDesiredAbsent"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ATOM-001": {
+      "priority": "P0",
+      "tests": ["src/internal/atomicfile/atomicfile_test.go::TestFailedReplaceLeavesOld"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-ATOM-002": {
+      "priority": "P0",
+      "tests": ["src/internal/atomicfile/atomicfile_test.go::TestReplaceExisting"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-GEO-001": {
+      "priority": "P0",
+      "tests": ["src/internal/geodata/manager_test.go::TestFailedValidatorLeavesWorkingUntouched"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-GEO-002": {
+      "priority": "P0",
+      "tests": ["src/internal/geodata/manager_test.go::TestChecksumMismatchLeavesExisting"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-GEO-003": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/geodata/manager_test.go::TestStatePointerWriteFailLeavesActive",
+        "src/internal/geodata/manager_test.go::TestMetadataWriteFailLeavesActive"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-GEO-004": {
+      "priority": "P0",
+      "tests": ["src/internal/geodata/manager_test.go::TestRollbackPrevious"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-GEO-005": {
+      "priority": "P0",
+      "tests": ["src/internal/geodata/manager_test.go::TestGCFailureDoesNotBreakActive"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-001": {
+      "priority": "P0",
+      "tests": ["src/internal/remotelists/manager_test.go::TestPrivateIPSSRFBlocked"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-002": {
+      "priority": "P0",
+      "tests": ["src/internal/remotelists/manager_test.go::TestUpdateInvalidContentKeepsCache"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-003": {
+      "priority": "P0",
+      "tests": ["src/internal/remotelists/manager_test.go::TestUpdateHTTP304CacheAndETag"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-004": {
+      "priority": "P0",
+      "tests": ["src/internal/remotelists/manager_test.go::TestTimeoutKeepsLKG"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-005": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/remotelists/manager_test.go::TestBadRedirectBlocked",
+        "src/internal/remotelists/manager_test.go::TestRedirectBlockedKeepsLKG"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-LIST-006": {
+      "priority": "P0",
+      "tests": ["src/internal/remotelists/manager_test.go::TestOrphanRevisionNotActivated"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-POL-001": {
+      "priority": "P0",
+      "tests": ["src/internal/remotepolicy/parse_test.go::TestRemotePolicyCannotProduceCommandExecution"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-POL-002": {
+      "priority": "P0",
+      "tests": ["src/internal/remotepolicy/parse_test.go::TestLocalOverrideBeatsRemotePolicy"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-POL-003": {
+      "priority": "P0",
+      "tests": ["src/internal/remotepolicy/parse_test.go::TestParseUnknownPolicyIgnored"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-POL-004": {
+      "priority": "P0",
+      "tests": ["src/internal/remotepolicy/parse_test.go::TestParseInvalidKnownPolicyRejected"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-PKG-001": {
+      "priority": "P0",
+      "tests": ["docs/hardware/probesafety_test.go::TestControlDependsUserland"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-PKG-002": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestPackagingControlNoKernelModulesOrNode",
+        "src/internal/xray/pin_test.go::TestLockPinCandidate"
+      ],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: control/pin already encode mipsel softfloat and pinned Xray; IPK inspect is a build gate"
+    },
+    "BTKN-TOOL-001": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestProbeScriptReadOnly"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-TOOL-011": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestCopyScriptViaSshCatClosesStdin"],
+      "redProof": "temporary BeginWrite without EndWrite; TestCopyScriptViaSshCatClosesStdin FAIL; restored before commit"
+    },
+    "BTKN-TOOL-012": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeSingleInstanceAlreadyRunning",
+        "docs/hardware/probesafety_test.go::TestProbeLockMkdirSerializes"
+      ],
+      "redProof": "65cbb2f name-only --cleanup-orphans; TestNoNameOnlyOrphanReap FAIL; executable A missing --selftest-hang"
+    },
+    "BTKN-TOOL-013": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeStaleLockRecovers"
+      ],
+      "redProof": "65cbb2f name-only orphan reap; TestNoNameOnlyOrphanReap FAIL; executable G/H not guaranteed"
+    },
+    "BTKN-TOOL-014": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeHardTimeoutKillsOwnedTree"
+      ],
+      "redProof": "65cbb2f watchdog is inside owned tree; executable B missing supervisor TIMEOUT"
+    },
+    "BTKN-TOOL-015": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestNoNameOnlyOrphanReap",
+        "docs/hardware/probesafety_test.go::TestProbeFailureLeavesNoStorm"
+      ],
+      "redProof": "65cbb2f btkn_reap_other_probe_scripts name-only kill; TestNoNameOnlyOrphanReap FAIL"
+    },
+    "BTKN-TOOL-016": {
+      "priority": "P0",
+      "tests": ["docs/hardware/probesafety_test.go::TestRedactPolicyFixtures"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-TOOL-017": {
+      "priority": "P0",
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestProbeExecutableProcessSafety",
+        "docs/hardware/probesafety_test.go::TestProbeNeverKillallOrForeign"
+      ],
+      "redProof": "65cbb2f name-only reap; executable D/F required beyond fakeProc graph"
+    },
+    "BTKN-TOOL-018": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestProbeDumpBudgetFitsDeadline"],
+      "redProof": "RED on 03e9fea: TestProbeDumpBudgetFitsDeadline FAIL try_net=28 loop_extra=11 cmd_sec=10 worst=410s>=180s; dump collapsed CMD_SEC=4; GREEN after"
+    },
+    "BTKN-TOOL-019": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestCredentialsNeverArgvOrLog"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    },
+    "BTKN-TOOL-020": {
+      "priority": "P0",
+      "tests": ["docs/hardware/probesafety_test.go::TestResearchLocalAndLogsGitignored"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: .gitignore already lists .research-local/ and *.log"
+    },
+    "BTKN-TOOL-021": {
+      "priority": "P0",
+      "tests": ["docs/hardware/scriptcheck_test.go::TestSmokeHarnessRequiresMutationGates"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+    }
+  }
+}

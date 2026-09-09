@@ -1,0 +1,57 @@
+wave: R6
+task: kn1011-harness
+agent: M
+branch: agent/r6/kn1011-harness
+worktree: blacktemple_kn-wt/r6-kn1011-harness
+base_sha: 90379f924d1bca60366423217701ff8e590b502e
+merge_authorized: false
+
+goal: >
+  Dual-gate KN-1011 harness scaffolding for a later live Apply. Read-only
+  probe remains valid. Do not execute mutating smoke in this wave. Do not
+  start R6-I. Production daemon never stops XKeen; only this harness may,
+  and only behind dual gates, when a later orchestrator wave authorizes it.
+
+allowed_paths:
+  - router-smoke.ps1
+  - scripts/router-probe.sh
+  - scripts/router-*.sh
+  - docs/hardware/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - lab/
+  - lab.ps1
+  - .github/workflows/
+  - src/
+  - scripts/install.sh
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-011 hybrid-iptables; hardware evidence SHA 90379f924d1bca60366423217701ff8e590b502e
+  - other_r6_agents: none (do not wait for D Apply; do not live-Apply)
+  - r6_i: not started
+
+acceptance_criteria:
+  - M exclusively owns router-smoke.ps1, scripts/router-*.sh, and docs/hardware/**.
+  - Probe mode stays read-only. Mutating Apply/smoke is not executed in R6-M. Missing credentials stay NOT RUN / non-zero, not a fake PASS.
+  - Dual gates are required before any future XKeen pause or BTKN_ install. Document gates; do not run them as live Apply.
+  - First smoke design (not run): one BTKN_TEST_CLIENT_IPV4, private DIRECT, public IPv4 via Xray 11820, DNS KEENETIC_DIRECT. Never port 1181.
+  - blackTempleHardwareSmoke remains NOT RUN. Do not write SUPPORTED. Do not change global swappiness. Do not disable IPv6.
+  - If a command is not actually run, report NOT RUN. Do not invent traces.
+  - Do not merge main. Push only agent/r6/kn1011-harness. R6-I is not started by this agent.
+
+do_not:
+  - execute live KN-1011 mutating smoke / Apply
+  - start R6-I
+  - write SUPPORTED
+  - stop XKeen from a production daemon path
+  - commit secrets, keys, or router passwords
+  - report QEMU as KN-1011 PASS
+  - change ADR-011 or ADR-001..010
+  - merge any branch

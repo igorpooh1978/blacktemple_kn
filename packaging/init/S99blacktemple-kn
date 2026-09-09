@@ -17,7 +17,63 @@ PATH=$PREFIX/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 mkdir -p "$PREFIX/run" "$PREFIX/logs" 2>/dev/null || true
 
+# Network-ready wait (condition loop with backoff, not a single delay).
+# Capture is not applied here: NDM hook + blacktempled netfilter-reconcile.
+# Timeout still starts the manager; missing Xray/route/LAN means fail-open.
+has_default_route() {
+	[ -r /proc/net/route ] || return 1
+	while read _iface dest _rest; do
+		if [ "$dest" = "00000000" ]; then
+			return 0
+		fi
+	done < /proc/net/route
+	return 1
+}
+
+network_ready() {
+	opt_ok=0
+	route_ok=0
+	lan_ok=0
+	xray_ok=0
+	if [ -d /opt/etc ] && [ -d "$PREFIX" ]; then
+		opt_ok=1
+	fi
+	if has_default_route; then
+		route_ok=1
+	fi
+	if [ -d /sys/class/net/br0 ] || [ -d /sys/class/net/br1 ]; then
+		lan_ok=1
+	fi
+	if [ -x "$PREFIX/bin/xray" ]; then
+		xray_ok=1
+	fi
+	[ "$opt_ok" -eq 1 ] && [ "$route_ok" -eq 1 ] && [ "$lan_ok" -eq 1 ] && [ "$xray_ok" -eq 1 ]
+}
+
+wait_network_ready() {
+	n=0
+	delay=1
+	while [ "$n" -lt 12 ]; do
+		if network_ready; then
+			return 0
+		fi
+		sleep "$delay"
+		n=$((n + 1))
+		delay=$((delay * 2))
+		if [ "$delay" -gt 5 ]; then
+			delay=5
+		fi
+	done
+	return 1
+}
+
 cmd=$1
+
+case "$cmd" in
+	start|restart)
+		wait_network_ready || true
+		;;
+esac
 
 case "$cmd" in
 	start|stop|restart)

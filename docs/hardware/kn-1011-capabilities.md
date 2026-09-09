@@ -1,10 +1,23 @@
 # KN-1011 capabilities (read-only probe)
 
-Status: **RUN** (2026-09-09). Raw dump is gitignored: `.research-local/hardware/kn1011-probe-20260909-091721.txt`.
+Status: **RUN** (2026-09-09). IPv6 table dump: `.research-local/hardware/kn1011-probe-20260909-094942.txt` (gitignored). Earlier IPv4-focused dump: `kn1011-probe-20260909-091721.txt`.
 
 This file is sanitized. No LAN/WAN addresses, MACs, SSIDs, UUIDs, passwords, Xray JSON bodies, or subscription URLs.
 
-Probe did not mutate iptables, policy routing, sysctl, packages, or processes. TPROXY/REDIRECT/MARK/TUN below are **PRESENT / NOT OBSERVED** evidence only — not `SUPPORTED`, not an engine choice. ADR-009 remains **UNKNOWN**.
+Probe did not mutate iptables, policy routing, sysctl, packages, or processes. TPROXY/REDIRECT/MARK/TUN below are **PRESENT / NOT OBSERVED** evidence only — not labelled SUPPORTED.
+
+## R6 hardware decisions
+
+| Item | Status |
+| --- | --- |
+| IPv4 hybrid (TCP REDIRECT + UDP TPROXY) | **SELECTED** (orchestrator; smoke still **NOT RUN**) |
+| IPv6 capture (BlackTemple) | **UNVERIFIED** |
+| `blackTempleHardwareSmoke` | **NOT RUN** |
+| TPROXY as SUPPORTED | never written |
+
+IPv4 hybrid is the orchestrator pick from R5.1 IPv4 evidence. It is not a hardware PASS and not a claim that all traffic goes through VPN. Live Apply was not executed this wave.
+
+IPv6 forwarding was already `1`. The 2026-09-09 09:49 dump now includes `ip6tables` nat/mangle/filter, `/proc/net/ip6_tables_targets`, and XKeen IPv6 names/targets. That is XKeen's IPv6 path, not a BlackTemple IPv6 capture implementation — hence **UNVERIFIED** for BlackTemple.
 
 ## Device (observed)
 
@@ -34,9 +47,27 @@ Probe did not mutate iptables, policy routing, sysctl, packages, or processes. T
 | Table 4096 | PRESENT | default via WAN iface + LAN scopes (addresses redacted) |
 | `ipset` | PRESENT | NDM sets plus XKeen `xkeen_deny_mac`, `geo_exclude`, `geo_override`, `user_exclude`, `ext_exclude` (+ v6 twins) |
 | nftables | NOT AVAILABLE | `nft` missing; live path is iptables/xtables |
-| BTKN_ chains | NOT OBSERVED | no `xray`/`BTKN_` tokens in nat/mangle/filter |
+| BTKN_ chains | NOT OBSERVED | no `xray`/`BTKN_` tokens in IPv4 or IPv6 nat/mangle/filter |
 
 Default route lives on WAN VLAN iface (`eth3.3` in dump). LAN bridges `br0`/`br1` present. Addresses omitted.
+
+## IPv6 CAPTURE EVIDENCE (not a BlackTemple path)
+
+Dump: `ip6tables -t nat|mangle|filter -S`, `/proc/net/ip6_tables_targets`. Missing tool would be `NOT AVAILABLE`; `ip6tables` was present.
+
+| Item | Result | Evidence |
+| --- | --- | --- |
+| `ip6tables` | PRESENT | `/opt/sbin/ip6tables`, `ip6tables v1.4.21` |
+| `/proc/net/ip6_tables_targets` | PRESENT | includes TPROXY, REDIRECT, MARK, CONNMARK (PRESENT, not SUPPORTED) |
+| IPv6 TPROXY | **PRESENT** | `ip6_tables_targets` + `xt_TPROXY`; live mangle `xkeen` UDP `-j TPROXY --on-port 1181 --on-ip ::1 --tproxy-mark 0x111` |
+| IPv6 REDIRECT | **PRESENT** | target list + live nat `xkeen` TCP `-j REDIRECT --to-ports 1181` |
+| IPv6 MARK / CONNMARK | **PRESENT** | targets + UDP `MARK 0x111` / `CONNMARK` |
+| XKeen IPv6 nat | PRESENT | chain `xkeen`; ipset `geo_exclude6` / `geo_override6` / `user_exclude6` / `ext_exclude6` |
+| XKeen IPv6 mangle | PRESENT | same chain name; UDP TPROXY split matching IPv4 hybrid |
+| XKeen IPv6 filter | NOT OBSERVED | no xkeen tokens in ip6tables filter |
+| BlackTemple IPv6 capture | **UNVERIFIED** | no `BTKN_` IPv6 chains; dump proves XKeen IPv6 capture, not BlackTemple |
+
+Do **not** treat this as a BlackTemple IPv6 capture path. IPv6 was not changed. XKeen IPv6 was not disabled.
 
 ## FIREWALL / CAPTURE EVIDENCE (not an engine pick)
 
@@ -50,7 +81,7 @@ Default route lives on WAN VLAN iface (`eth3.3` in dump). LAN bridges `br0`/`br1
 | `tun` module | **NOT OBSERVED** | `tun_module: NOT OBSERVED` |
 | Live XKeen capture split | OBSERVED | hook excerpt: `network_redirect='tcp'`, `network_tproxy='udp'`, both ports `1181` |
 
-Do **not** read PRESENT as SUPPORTED for BlackTemple. Capture engine is **not** selected here.
+Do **not** read PRESENT as SUPPORTED for BlackTemple. IPv4 hybrid is orchestrator-SELECTED; live smoke is **NOT RUN**.
 
 ## DNS MATRIX
 
@@ -118,11 +149,12 @@ Xray JSON under `/opt/etc/xray/configs/` exists; contents not copied into git.
 | `xkeen -v` | `XKeen 2.0 Stable`, build `2026-06-06 08:53:30 MSK`; Xray `26.7.28` (Russian UI text mojibake in Windows capture; ASCII tokens unambiguous) |
 | Init | `/opt/etc/init.d/S05xkeen`, `S99xkeen-ui` |
 | Hook | `/opt/etc/ndm/netfilter.d/proxy.sh` (22369 bytes) |
-| Chains | nat + mangle chain `xkeen`; comments `xkeen_rule` |
-| TCP capture | REDIRECT → 1181 |
-| UDP capture | TPROXY → 1181, mark `0x111` |
+| Chains | IPv4 + IPv6 nat + mangle chain `xkeen`; comments `xkeen_rule`; filter: no xkeen |
+| TCP capture | IPv4 and IPv6 REDIRECT → 1181 |
+| UDP capture | IPv4 TPROXY → 1181 `127.0.0.1`; IPv6 TPROXY → 1181 `::1`; mark `0x111` |
+| IPv6 ipset twins | `geo_exclude6`, `geo_override6`, `user_exclude6`, `ext_exclude6` |
 | Policy mark | `0xffffaaa` (PREROUTING + `ip rule`) |
-| Private nets excluded | RFC1918 / loopback / link-local / broadcast in `xkeen` chain (plus redacted extra prefixes) |
+| Private nets excluded | RFC1918 / loopback / link-local / broadcast in `xkeen` chain (plus redacted extra prefixes); IPv6 `::`, `::1`, `fd00::/8`, `ff00::/8`, `fe80::/10` |
 | Help flags **not** run | `-dns`, `-pr`, `-ipv6`, `-pbr` (and other mutators) |
 | BlackTemple coexistence | no BTKN_ chains; do not touch `/opt/sbin/xray` or XKeen hooks |
 
@@ -138,16 +170,58 @@ Evidence only, no engine or cgroup policy chosen:
 
 ```powershell
 .\router-smoke.ps1 -Mode Probe
+.\router-smoke.ps1 -Mode Smoke
+go test ./docs/hardware
 ```
 
-Runner loaded gitignored `.env` (not committed). Copy used `ssh cat` because remote SFTP (`/opt/libexec/sftp-server`) is absent. Password was not placed on the ssh argv.
+-Mode Probe this iteration: copy **timed out** (see PACKAGE PROVENANCE). Script still includes PACKAGE-PROVENANCE / MODULE-PROVENANCE sections for the next successful run.
 
-Remote: `sh /tmp/btkn-router-probe.sh` (read-only).
+`-Mode Smoke` prints `LIVE ROUTING SMOKE: NOT RUN` `reason: APP_SMOKE_NOT_WIRED` (kernel harness is not BlackTemple app smoke). Mutating Apply was **not** invoked. Both `BTKN_ALLOW_ROUTING_MUTATION` and `BTKN_ALLOW_XKEEN_STOP` were unset.
 
 ## Not done
 
-- KN-1011 smoke hardware gate (`-Mode Smoke`) still unimplemented (exit 2).
-- No iptables/TPROXY/TUN applied by BlackTemple.
-- No TrafficCaptureEngine selection.
-- R6 not started.
+- `blackTempleHardwareSmoke`: **NOT RUN** (dual gates not set; live Apply forbidden this parallel wave).
+- No BlackTemple IPv4/IPv6 capture installed. No `BTKN_` rules applied.
+- IPv6 capture (BlackTemple): **UNVERIFIED**.
+- TPROXY not labelled SUPPORTED.
+- IPv6 on the router was not changed. XKeen was not stopped.
 - No merge to `main`.
+
+## PACKAGE PROVENANCE (R6-H)
+
+This-iteration live `.\router-smoke.ps1 -Mode Probe` **timed out** copying the probe via `ssh cat` (exit 124; SSH_ASKPASS + redirected stdin did not complete within 60s). TCP 22 to the router was reachable. Mutating gates were **not** set. XKeen was **not** stopped.
+
+Read-only `opkg status` / `opkg files` / `opkg search` for `ip-full`, `iptables`, `ipset`, `ca-bundle` is implemented in `scripts/router-probe.sh` (`PACKAGE-PROVENANCE`). **This iteration did not capture a fresh dump.**
+
+R5.1 (2026-09-09) already observed Entware userland:
+
+| Tool | R5.1 evidence |
+| --- | --- |
+| `iptables` | `/opt/sbin/iptables` (xtables 1.4.21) |
+| `ipset` | PRESENT v7.24 |
+| `ip` | PRESENT (`ip rule` / `ip route`) |
+| `ca-bundle` | not required by BlackTemple Go TLS (no `SystemCertPool` / system CA usage in `src/`) |
+
+IPK `Depends: ip-full, iptables, ipset` matches production D `HybridRequirements()` tools. Not copied from XKeen (`curl`/`jq`/`coreutils-*` omitted). `ca-bundle` not in Depends.
+
+## MODULE PROVENANCE (R6-H)
+
+Probe searches only:
+
+```text
+/lib/modules/$(uname -r)
+/lib/system-modules/$(uname -r)
+/opt/lib/modules
+/opt/lib/system-modules/$(uname -r)
+```
+
+R5.1 `lsmod` already showed `xt_TPROXY`, `xt_socket` loaded (PRESENT, not SUPPORTED). Fresh path/package-owner dump this iteration: **NOT RUN**.
+
+## BARE INSTALL / CURRENT ENVIRONMENT
+
+| Item | Status |
+| --- | --- |
+| Current environment | **XKEEN_PRESENT** (R5.1; not uninstalled) |
+| BARE BOOTSTRAP CODE | IMPLEMENTED (`src/internal/platform/keenetic` Detect/Prepare/Verify) |
+| BARE CLEAN INSTALL | **NOT VERIFIED** |
+| Prepare on live KN-1011 | **NOT RUN** (modules not loaded this iteration) |

@@ -64,6 +64,25 @@ ACCEPTANCE_TESTS
 
 Не писать VPN вслепую. Не маркировать протокол `SUPPORTED`, пока нет hardware PASS.
 
+## Gherkin
+
+Обязательный процесс для наблюдаемого поведения:
+
+```text
+Behavior → Gherkin → executable acceptance → RED → production code → GREEN
+```
+
+Сценарии: `features/*.feature`. Карта: `features/scenario-map.json`.
+Проверка (stdlib only, без Godog/Cucumber):
+
+```powershell
+go run ./tools/gherkincheck
+```
+
+CI запускает `gherkincheck` на каждом pull_request и push в `main`.
+Новое наблюдаемое поведение без Scenario ID + RED + GREEN — `STATUS: PROCESS_VIOLATION`.
+Временные RED-мутации production-кода не коммитятся.
+
 ## Handoff
 
 Каждый агент возвращает блок из `docs/ai/AGENT-HANDOFF.md`.

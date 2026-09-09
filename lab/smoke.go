@@ -298,6 +298,10 @@ func Smoke(cfg LabConfig) Result {
 	if hostConfig != "" {
 		copies = append(copies, [2]string{hostConfig, guestPrefix + "/config/xray-lab.json"})
 	}
+	transp := filepath.Join(cfg.Root, "lab", "testdata", "xray-lab-transparent.json")
+	if _, err := os.Stat(transp); err == nil {
+		copies = append(copies, [2]string{transp, guestPrefix + "/config/xray-lab-transparent.json"})
+	}
 	if _, err := os.Stat(guestSmoke); err == nil {
 		copies = append(copies, [2]string{guestSmoke, "/tmp/smoke.sh"})
 	}

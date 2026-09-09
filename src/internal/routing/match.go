@@ -138,11 +138,18 @@ func (m Match) IsPrivateOrLocal() bool {
 
 func prefixIsPrivateOrLocal(p netip.Prefix) bool {
 	addr := p.Addr()
-	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() {
+	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsMulticast() {
+		return true
+	}
+	if isLimitedBroadcast(addr) {
 		return true
 	}
 	// Unique local IPv6 (fc00::/7) is IsPrivate in Go 1.22+.
 	return false
+}
+
+func isLimitedBroadcast(addr netip.Addr) bool {
+	return addr.Is4() && addr.As4() == [4]byte{255, 255, 255, 255}
 }
 
 // MatchesHost evaluates domain-like kinds only. geoip/geosite/protocol/remote-list

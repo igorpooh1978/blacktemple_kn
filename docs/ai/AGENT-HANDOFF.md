@@ -25,6 +25,7 @@ NEXT RECOMMENDED STEP
 
 Правила:
 
+- Gherkin: Scenario ID, RED proof или `RED_PROOF_NOT_AVAILABLE`, GREEN tests.
 - Если команда/тест/benchmark не запускались — писать `NOT RUN`.
 - Не придумывать output.
 - SHA только из `git rev-parse`.

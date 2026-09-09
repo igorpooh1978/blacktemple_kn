@@ -1,0 +1,63 @@
+wave: R6
+task: xray-engine
+agent: C
+branch: agent/r6/xray-engine
+worktree: blacktemple_kn-wt/r6-xray-engine
+base_sha: 90379f924d1bca60366423217701ff8e590b502e
+merge_authorized: false
+
+goal: >
+  Extend the pinned-Xray JSON generator with hybrid-iptables inbounds on
+  BlackTemple port 11820 (never 1181). Do not claim SUPPORTED. Do not apply
+  capture on a router.
+
+allowed_paths:
+  - src/internal/xray/
+  - src/internal/protocols/
+  - third_party/xray.lock.json
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - tools/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - src/internal/auth/
+  - src/internal/profiles/
+  - src/internal/keys/
+  - src/internal/supervisor/
+  - src/internal/platform/
+  - src/internal/routing/
+  - src/internal/dns/
+  - router-smoke.ps1
+  - scripts/
+  - docs/hardware/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-003 Xray is a pinned external binary; ADR-011 hybrid-iptables
+  - other_r6_agents: none (do not wait for D Apply; generator is library-only)
+  - r6_i: not started
+
+acceptance_criteria:
+  - Xray is not imported as a Go library. Pin is unchanged unless orchestrator reopens it.
+  - Hybrid capture inbounds (dokodemo-door or equivalent JSON) listen on port 11820 only. Never 1181.
+  - IPv4 TCP path is REDIRECT-compatible (followRedirect). IPv4 UDP path is TPROXY-compatible. Mihomo is not used.
+  - SOCKS loopback inbound may remain for local proxy. Do not intercept DNS in generated config this wave.
+  - hardwareVerification.qemu and kn-1011 stay NOT RUN unless this agent actually ran them. Do not write SUPPORTED.
+  - CGO_ENABLED=0. No new go.mod dependencies. Unit/golden tests without a live router.
+  - Do not merge main. Push only agent/r6/xray-engine. R6-I is not started by this agent.
+
+do_not:
+  - use port 1181
+  - import github.com/xtls/xray-core or any xray Go module
+  - add Go modules or CGO
+  - mark protocol or capture SUPPORTED
+  - stop or modify XKeen
+  - apply iptables / TPROXY / TUN on any host
+  - merge any branch

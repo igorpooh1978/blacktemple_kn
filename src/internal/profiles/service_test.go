@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,6 +17,10 @@ import (
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/servers"
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/subscription"
 )
+
+// blackKeySubscriptionPlaceholder is the only allowed subscription URL token in docs/fixtures.
+// Never commit a real BlackKey.
+const blackKeySubscriptionPlaceholder = "<BLACKKEY_SUBSCRIPTION_URL>"
 
 const fixtureUUID = "uuid-test"
 
@@ -140,6 +145,55 @@ func TestImportSubscriptionURL(t *testing.T) {
 	}
 	if err := svc.Refresh(context.Background(), p.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRefreshFailurePreservesKeys(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(fixtureVLESS()))
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	svc := NewService(srv.Client(), nil)
+	p, err := svc.Import(context.Background(), ImportRequest{BlackKey: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := svc.Keys(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) == 0 {
+		t.Fatal("expected keys after import")
+	}
+	if err := svc.Refresh(context.Background(), p.ID); err == nil {
+		t.Fatal("refresh must fail on download error")
+	}
+	after, err := svc.Keys(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) || after[0].ID != before[0].ID {
+		t.Fatalf("last-known-good mutated: before=%v after=%v", before, after)
+	}
+}
+
+func TestProfileDeleteNotImplemented(t *testing.T) {
+	if strings.Contains(blackKeySubscriptionPlaceholder, "://") {
+		t.Fatal("placeholder must not be a live URL")
+	}
+	rt := reflect.TypeOf(&Service{})
+	for i := 0; i < rt.NumMethod(); i++ {
+		if strings.EqualFold(rt.Method(i).Name, "Delete") {
+			t.Fatal("profiles.Service.Delete is not part of the current R6 contract")
+		}
 	}
 }
 

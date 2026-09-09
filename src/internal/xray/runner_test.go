@@ -123,6 +123,36 @@ func TestRunnerRequiresExecutable(t *testing.T) {
 	}
 }
 
+func TestValidateTransparentConfigLive(t *testing.T) {
+	exe := lookupXray(t)
+	r := &Runner{Executable: exe}
+
+	socks, err := Generate(fixtureProfile("tcp", "reality"), fixtureSecrets(), fixtureParams("tcp"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Generate(fixtureProfile("tcp", "reality"), fixtureSecrets(), fixtureParams("tcp"), Options{Transparent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	socksPath := filepath.Join(t.TempDir(), "socks.json")
+	if err := os.WriteFile(socksPath, socks, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ValidateConfig(ctx, socksPath); err != nil {
+		t.Fatal(err)
+	}
+	trPath := filepath.Join(t.TempDir(), "transparent.json")
+	if err := os.WriteFile(trPath, tr, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ValidateConfig(ctx, trPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateMalformedConfigLive(t *testing.T) {
 	exe := lookupXray(t)
 	r := &Runner{Executable: exe}

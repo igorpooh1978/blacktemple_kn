@@ -14,17 +14,27 @@ const (
 	defaultFingerprint = "chrome"
 	visionFlow         = "xtls-rprx-vision"
 
-	tagInbound  = "socks-in"
-	tagOutbound = "proxy"
+	tagInbound    = "socks-in"
+	tagRedirectIn = "redirect-in"
+	tagTproxyIn   = "tproxy-in"
+	tagOutbound   = "proxy"
+	tunnelProto   = "tunnel"
+	tproxyTProxy  = "tproxy"
+	xkeenLivePort = 1181
+	// transparentListen is not loopback: PREROUTING REDIRECT delivers to
+	// a local address of the router, not a client connect to 127.0.0.1.
+	transparentListen = "0.0.0.0"
 )
 
 // Options controls inbound bind and debug pretty-print.
 type Options struct {
-	ListenHost    string
-	ListenPort    int
-	EphemeralPort bool // bind 127.0.0.1:0; Xray accepts port 0 at `run -test`
-	Pretty        bool // debug only; production must stay compact
-	LogLevel      string
+	ListenHost      string
+	ListenPort      int
+	EphemeralPort   bool // bind 127.0.0.1:0; Xray accepts port 0 at `run -test`
+	Pretty          bool // debug only; production must stay compact
+	LogLevel        string
+	Transparent     bool // add hybrid tunnel inbounds; SOCKS inbound stays
+	TransparentPort int  // default 11820; never 1181 (live XKeen)
 }
 
 func (o Options) withDefaults() Options {
@@ -38,6 +48,9 @@ func (o Options) withDefaults() Options {
 		o.ListenPort = 0
 	} else if o.ListenPort == 0 {
 		o.ListenPort = defaultListenPort
+	}
+	if o.Transparent && o.TransparentPort == 0 {
+		o.TransparentPort = DefaultTransparentPort
 	}
 	return o
 }
@@ -68,15 +81,44 @@ func Generate(profile Profile, secrets ConfigSecrets, params OutboundParams, opt
 		return nil, err
 	}
 
+	inbounds := []xrayInbound{{
+		Tag:      tagInbound,
+		Listen:   opts.ListenHost,
+		Port:     opts.ListenPort,
+		Protocol: "socks",
+		Settings: inboundSettings{Auth: "noauth", UDP: true},
+	}}
+	if opts.Transparent {
+		inbounds = append(inbounds,
+			xrayInbound{
+				Tag:      tagRedirectIn,
+				Listen:   transparentListen,
+				Port:     opts.TransparentPort,
+				Protocol: tunnelProto,
+				Settings: inboundSettings{
+					AllowedNetwork: "tcp",
+					FollowRedirect: true,
+				},
+			},
+			xrayInbound{
+				Tag:      tagTproxyIn,
+				Listen:   transparentListen,
+				Port:     opts.TransparentPort,
+				Protocol: tunnelProto,
+				Settings: inboundSettings{
+					AllowedNetwork: "udp",
+					FollowRedirect: true,
+				},
+				StreamSettings: &inboundStreamSettings{
+					Sockopt: sockoptSettings{TProxy: tproxyTProxy},
+				},
+			},
+		)
+	}
+
 	cfg := xrayConfig{
-		Log: xrayLog{Loglevel: opts.LogLevel},
-		Inbounds: []xrayInbound{{
-			Tag:      tagInbound,
-			Listen:   opts.ListenHost,
-			Port:     opts.ListenPort,
-			Protocol: "socks",
-			Settings: inboundSettings{Auth: "noauth", UDP: true},
-		}},
+		Log:      xrayLog{Loglevel: opts.LogLevel},
+		Inbounds: inbounds,
 		Outbounds: []xrayOutbound{{
 			Tag:      tagOutbound,
 			Protocol: "vless",
@@ -229,6 +271,9 @@ func validateProfile(profile Profile, secrets ConfigSecrets, params OutboundPara
 	if !opts.EphemeralPort && (opts.ListenPort < 1 || opts.ListenPort > 65535) {
 		return fmt.Errorf("listen port must be 1-65535")
 	}
+	if err := validateTransparent(opts); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -280,16 +325,28 @@ type xrayLog struct {
 }
 
 type xrayInbound struct {
-	Tag      string          `json:"tag"`
-	Listen   string          `json:"listen"`
-	Port     int             `json:"port"`
-	Protocol string          `json:"protocol"`
-	Settings inboundSettings `json:"settings"`
+	Tag            string                 `json:"tag"`
+	Listen         string                 `json:"listen"`
+	Port           int                    `json:"port"`
+	Protocol       string                 `json:"protocol"`
+	Settings       inboundSettings        `json:"settings"`
+	StreamSettings *inboundStreamSettings `json:"streamSettings,omitempty"`
 }
 
 type inboundSettings struct {
-	Auth string `json:"auth"`
-	UDP  bool   `json:"udp"`
+	Auth           string `json:"auth,omitempty"`
+	UDP            bool   `json:"udp,omitempty"`
+	Network        string `json:"network,omitempty"`
+	AllowedNetwork string `json:"allowedNetwork,omitempty"`
+	FollowRedirect bool   `json:"followRedirect,omitempty"`
+}
+
+type inboundStreamSettings struct {
+	Sockopt sockoptSettings `json:"sockopt"`
+}
+
+type sockoptSettings struct {
+	TProxy string `json:"tproxy,omitempty"`
 }
 
 type xrayOutbound struct {

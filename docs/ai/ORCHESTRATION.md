@@ -59,6 +59,8 @@
 
 ## Merge
 
+Наблюдаемое поведение: Gherkin → RED → code → GREEN. Карта `features/scenario-map.json`. `go run ./tools/gherkincheck` обязателен. Не создавать R6-I без оркестратора.
+
 Только оркестратор определяет порядок merge в `main`. Агенты пушат свои `agent/<wave>/<task>` ветки и **не** merge'ат.
 
 Исключение bootstrap R0: первый commit идёт прямо в `main`, потому что репозитория ещё нет.

@@ -42,9 +42,11 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: |
-          test -z "$(gofmt -l src tools)"
-          go vet ./src/... ./tools/...
-          go test ./src/... ./tools/...
+          test -z "$(gofmt -l src tools lab docs/hardware)"
+          go vet ./src/... ./tools/... ./lab/...
+          go test ./src/... ./tools/... ./lab/...
+          go test ./docs/hardware
+          go run ./tools/gherkincheck
       - name: host tools
         env:
           CGO_ENABLED: "0"

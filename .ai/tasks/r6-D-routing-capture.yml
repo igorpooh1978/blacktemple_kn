@@ -1,0 +1,67 @@
+wave: R6
+task: routing-capture
+agent: D
+branch: agent/r6/routing-capture
+worktree: blacktemple_kn-wt/r6-routing-capture
+base_sha: 90379f924d1bca60366423217701ff8e590b502e
+merge_authorized: false
+
+goal: >
+  Implement hybrid-iptables TrafficCaptureEngine planner against ADR-011.
+  Plan/DryRun/Preflight allowed. Apply() must return ErrExistingCaptureEngine
+  when XKeen capture is detected. Do not live-Apply on KN-1011.
+
+allowed_paths:
+  - src/internal/routing/
+  - src/internal/dns/
+  - src/internal/geodata/
+
+forbidden_paths:
+  - contracts/
+  - docs/adr/
+  - go.mod
+  - go.sum
+  - web/
+  - packaging/
+  - lab/
+  - lab.ps1
+  - router-smoke.ps1
+  - scripts/
+  - .github/workflows/
+  - src/internal/xray/
+  - src/internal/protocols/
+  - src/internal/remotelists/
+  - src/internal/remotepolicy/
+  - src/cmd/
+  - src/internal/app/
+  - src/internal/api/
+  - agent-manifest.yml
+
+dependencies:
+  - frozen_contracts: ADR-011 hybrid-iptables; capture.engine schema enum unchanged
+  - other_r6_agents: none (do not wait for C/F/M; do not start R6-I)
+  - r6_i: not started
+
+acceptance_criteria:
+  - Runtime engine name is hybrid-iptables. Schema still lacks that enum; map internally, do not edit contracts/.
+  - IPv4 TCP=REDIRECT, IPv4 UDP=TPROXY, backend=iptables/xtables. TUN is fallback stub, not primary. nft is not generated.
+  - Chains BTKN_PRE BTKN_TCP BTKN_UDP BTKN_OUT(reserved). ipsets btkn_clients_v4 btkn_exclude_v4.
+  - TPROXY mark 0x42544b4e/0xffffffff, table 4254, port 11820. Bypass mark 0x42544b4f reserved unused.
+  - First-smoke plan: one client BTKN_TEST_CLIENT_IPV4; private DIRECT; public IPv4 via Xray. DNS mode KEENETIC_DIRECT. Do not intercept DNS.
+  - DNSCaptureEngine is a seam/stub only this wave. IPv4 hybrid SELECTED; IPv6 capture UNVERIFIED; never globally disable IPv6.
+  - fail-open default. Detect XKeen (port 1181 / mark 0x111 / table 111 / chain xkeen) and never modify it. Apply() → ErrExistingCaptureEngine. Plan/DryRun/Preflight allowed.
+  - Memory AUTO must not emit sysctl -w vm.swappiness. GOMEMLIMIT is not a default.
+  - CGO_ENABLED=0. No new go.mod dependencies. Unit tests without real iptables or hardware.
+  - Do not merge main. Push only agent/r6/routing-capture. R6-I is not started by this agent.
+
+do_not:
+  - live Apply on KN-1011 or any router
+  - modify XKeen rules, stop XKeen, or use port 1181
+  - intercept DNS / ndnproxy
+  - generate nftables
+  - disable IPv6 globally
+  - change swappiness
+  - edit contracts/ or ADR-001..010
+  - add Go modules
+  - merge any branch
+  - write SUPPORTED

@@ -6,6 +6,7 @@ Stable **нельзя** назвать DONE без:
 - IPK PASS
 - QEMU PASS
 - KN-1011 PASS
+- `go run ./tools/gherkincheck` PASS
 - restart PASS
 - key change PASS
 - geodata PASS

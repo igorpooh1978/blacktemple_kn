@@ -45,11 +45,21 @@ if [ -x "$PREFIX/bin/xray" ]; then
 	if [ -f "$PREFIX/config/xray-lab.json" ]; then
 		"$PREFIX/bin/xray" run -test -c "$PREFIX/config/xray-lab.json"
 		echo "SMOKE_XRAY_TEST_OK"
+		if [ -f "$PREFIX/config/xray-lab-transparent.json" ]; then
+			"$PREFIX/bin/xray" run -test -c "$PREFIX/config/xray-lab-transparent.json"
+			echo "SMOKE_XRAY_TRANSPARENT_TEST_OK"
+		fi
 		"$PREFIX/bin/xray" run -c "$PREFIX/config/xray-lab.json" >/dev/null 2>&1 &
 		echo $! > "$PREFIX/run/xray.pid"
 		sleep 1
 		if kill -0 "$(cat "$PREFIX/run/xray.pid")" 2>/dev/null; then
 			echo "SMOKE_XRAY_START_OK"
+			if netstat -lnt 2>/dev/null | grep -q 11080 || ss -lnt 2>/dev/null | grep -q 11080; then
+				echo "SMOKE_SOCKS_LISTEN_OK"
+			else
+				echo "SMOKE_SOCKS_LISTEN_FAIL"
+				exit 1
+			fi
 		else
 			echo "SMOKE_XRAY_START_FAIL"
 			exit 1
@@ -72,4 +82,5 @@ else
 	echo "SMOKE_XRAY_MISSING"
 	exit 1
 fi
+echo "SMOKE_BARE_DETECTOR_GRACEFUL"
 echo "SMOKE_PASS"

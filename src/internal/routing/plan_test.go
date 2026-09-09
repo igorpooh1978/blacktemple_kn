@@ -64,7 +64,7 @@ func TestPrivateDirect(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
 		}
-		cases := []string{"10.1.2.3", "192.168.0.1", "172.16.9.9", "127.0.0.1", "::1", "169.254.1.1"}
+		cases := []string{"10.1.2.3", "192.168.0.1", "172.16.9.9", "127.0.0.1", "::1", "169.254.1.1", "224.0.0.1", "255.255.255.255", "ff02::1"}
 		for _, s := range cases {
 			ip := netip.MustParseAddr(s)
 			if got := p.ActionForIP(ip); got != ActionDirect {

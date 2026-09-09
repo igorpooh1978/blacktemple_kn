@@ -1,0 +1,61 @@
+wave: R6
+task: orchestration
+agent: O
+branch: agent/r6/orchestration
+worktree: blacktemple_kn-wt/r6-orchestration
+base_sha: 90379f924d1bca60366423217701ff8e590b502e
+merge_authorized: false
+
+goal: >
+  Accept hybrid-iptables from KN-1011 evidence (ADR-011). Record R6 parallel
+  scope for O/C/D/F/M. Do not implement Go. Do not start R6-I live Apply.
+  Do not run mutating router smoke.
+
+allowed_paths:
+  - agent-manifest.yml
+  - .ai/
+  - docs/adr/ADR-011-kn1011-hybrid-capture.md
+  - docs/ai/
+
+forbidden_paths:
+  - docs/adr/ADR-001-clean-room.md
+  - docs/adr/ADR-002-kn-1011-mipsle-softfloat.md
+  - docs/adr/ADR-003-xray-pinned-process.md
+  - docs/adr/ADR-004-entware-service-restarts.md
+  - docs/adr/ADR-005-json-atomic-storage.md
+  - docs/adr/ADR-006-minimal-web-ui.md
+  - docs/adr/ADR-007-optional-provider.md
+  - docs/adr/ADR-008-windows-ipk-elf.md
+  - docs/adr/ADR-009-traffic-capture.md
+  - docs/adr/ADR-010-remote-policy-allowlist.md
+  - contracts/
+  - go.mod
+  - go.sum
+  - src/
+  - web/
+  - packaging/
+  - router-smoke.ps1
+  - scripts/
+  - docs/hardware/
+
+dependencies:
+  - frozen_contracts: ADR-001 through ADR-010 must not be edited; capture.engine schema stays frozen
+  - hardware_evidence_sha: 90379f924d1bca60366423217701ff8e590b502e
+  - r6_i: not started
+
+acceptance_criteria:
+  - ADR-011 exists, Status Accepted (R6), captureEngine hybrid-iptables, SELECTED_BY_HARDWARE_EVIDENCE.
+  - blackTempleHardwareSmoke remains NOT RUN. Do not write SUPPORTED.
+  - agent-manifest.yml current wave R6, r6_status in_progress, merge_authorized false, next_recommended ORCHESTRATOR REVIEW.
+  - OWNERSHIP.md current wave R6; F owns packaging/keenetic/**; M owns router-smoke.ps1, scripts/router-*.sh, docs/hardware/**.
+  - Task files for O C D F M. Report r6-parallel-scope.md and capture-engine contract gap.
+  - Do not implement Go. Do not merge any branch. Do not start R6-I.
+
+do_not:
+  - implement Go or add go.mod dependencies
+  - edit ADR-001 through ADR-010
+  - edit contracts/
+  - run mutating KN-1011 smoke
+  - start R6-I live Apply
+  - merge any branch
+  - write SUPPORTED
