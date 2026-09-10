@@ -107,3 +107,12 @@ Feature: Xray configuration
     When shortId is empty
     Then generate accepts it
     And a structurally invalid shortId is classified without emitting the value
+
+  @BTKN-XRAY-018 @P0 @xray
+  Scenario: Resolved VLESS WS TLS generates valid SOCKS-only config
+    Given a normalized VLESS WS TLS candidate
+    When generate writes SOCKS-only xray.json
+    Then the outbound is VLESS WS TLS
+    And socks-in remains 127.0.0.1:11080
+    And Reality settings are absent
+    And xray run -test is attempted where the pinned binary is available

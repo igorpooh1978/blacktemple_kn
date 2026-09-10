@@ -10,24 +10,24 @@ import (
 )
 
 func TestConnectClassifiesCredentialFailures(t *testing.T) {
-	eng := &fakeEngine{}
+	eng := &fakeEngine{failValidate: true}
 	s := newTestService(t, eng)
-	share := "vless://test@example.com:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=www.example.com&fp=chrome&pbk=abcde#NL-1"
+	share := vlessShare()
 	if _, err := s.Profiles().Import(context.Background(), profiles.ImportRequest{BlackKey: share, Name: "lab"}); err != nil {
 		t.Fatal(err)
 	}
 	err := s.Control(context.Background(), "connect")
 	if err == nil {
-		t.Fatal("connect must fail on dummy Reality public key")
+		t.Fatal("connect must fail on rejected xray config")
 	}
-	if strings.Contains(err.Error(), "abcde") || strings.Contains(err.Error(), "test") {
+	if strings.Contains(err.Error(), testUUID) || strings.Contains(err.Error(), "_Cfw") {
 		t.Fatalf("public error leaked credential: %v", err)
 	}
 	st := s.Status()
 	if st.Connection != "failed" {
 		t.Fatalf("connection=%s want failed", st.Connection)
 	}
-	if st.ErrorClass != "INVALID_REALITY_PUBLIC_KEY" && st.ErrorClass != "INVALID_VLESS_USER_ID" && st.ErrorClass != "XRAY_CONFIG_REJECTED" {
+	if st.ErrorClass != "INVALID_VLESS_USER_ID" && st.ErrorClass != "INVALID_REALITY_PUBLIC_KEY" && st.ErrorClass != "INVALID_REALITY_SHORT_ID" && st.ErrorClass != "XRAY_CONFIG_REJECTED" {
 		t.Fatalf("errorClass=%q want a credential class", st.ErrorClass)
 	}
 	b, err := json.Marshal(st)

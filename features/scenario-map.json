@@ -974,6 +974,36 @@
       "priority": "P0",
       "tests": ["src/internal/connection/socks_only_test.go::TestChangeKeyDoesNotStopRunningSOCKS"],
       "redProof": "RED: TestChangeKeyDoesNotStopRunningSOCKS FAIL if failed ChangeKey stops Xray"
+    },
+    "BTKN-PROF-018": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolved_test.go::TestBlackKeyBootstrapNotPublishedAsServer"],
+      "redProof": "RED: TestBlackKeyBootstrapNotPublishedAsServer FAIL while Import publishes Reality pbk=5 as a key"
+    },
+    "BTKN-PROF-019": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolved_test.go::TestImportResolvedVLESSWSTLSPersists"],
+      "redProof": "RED: TestImportResolvedVLESSWSTLSPersists FAIL until ImportResolved exists and skips Reality"
+    },
+    "BTKN-CONN-013": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/resolved_test.go::TestUnresolvedBlackKeyRequiresResolution"],
+      "redProof": "RED: TestUnresolvedBlackKeyRequiresResolution FAIL while Connect returns INVALID_REALITY_PUBLIC_KEY"
+    },
+    "BTKN-CONN-014": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/resolved_test.go::TestCandidateLoopPromotesHealthyToLKG"],
+      "redProof": "RED: TestCandidateLoopPromotesHealthyToLKG FAIL until Connect iterates candidates"
+    },
+    "BTKN-CONN-015": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/resolved_test.go::TestRestartRestoresResolvedWithoutProvider"],
+      "redProof": "RED: TestRestartRestoresResolvedWithoutProvider FAIL until resolved keys persist with LKG"
+    },
+    "BTKN-XRAY-018": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/resolved_ws_test.go::TestResolvedVLESSWSTLSSocksOnly"],
+      "redProof": "RED: TestResolvedVLESSWSTLSSocksOnly FAIL if generate emits Reality or non-SOCKS inbounds"
     }
   }
 }

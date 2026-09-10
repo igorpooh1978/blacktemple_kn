@@ -224,12 +224,20 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (Profile, error
 			FetchedAt:   s.now(),
 		}
 		sub = withSource(sub, subMeta.source)
-		ks, srvs := s.entities(id, subID, parsed.Entries)
+		published := filterPublishable(parsed.Entries)
+		ks, srvs := s.entities(id, subID, published)
 		st := keys.NewState(id, ks)
 		if len(ks) > 0 {
 			_, _ = st.SelectCandidate(ks[0].ID, ks[0].ServerID)
 		}
-		p = Profile{ID: id, Name: name, SubscriptionID: subID, CreatedAt: s.now()}
+		p = Profile{
+			ID:              id,
+			Name:            name,
+			SubscriptionID:  subID,
+			CreatedAt:       s.now(),
+			SourceKind:      sourceKindOf(subMeta.kind, parsed.Entries, published),
+			ResolutionState: resolutionOf(len(ks)),
+		}
 		m.byID[id] = &record{profile: p, sub: sub, keys: st, servers: srvs}
 		m.order = append(m.order, id)
 		if m.activeID == "" {
@@ -266,16 +274,22 @@ func (s *Service) Refresh(ctx context.Context, profileID string) error {
 		if !ok {
 			return ErrNotFound
 		}
-		ks, srvs := s.entities(profileID, rec.sub.ID, parsed.Entries)
-		prev, had := rec.keys.ActiveCandidate()
-		rec.keys.SetKeys(ks)
-		rec.servers = srvs
+		published := filterPublishable(parsed.Entries)
 		sub := rec.sub
 		sub.ContentType = subMeta.contentType
 		sub.Encoding = parsed.Encoding
 		sub.EntryCount = len(parsed.Entries)
 		sub.FetchedAt = s.now()
 		rec.sub = withSource(sub, src)
+		if len(published) == 0 {
+			rec.profile.ResolutionState = resolutionOf(len(rec.keys.Keys))
+			return nil
+		}
+		ks, srvs := s.entities(profileID, rec.sub.ID, published)
+		prev, had := rec.keys.ActiveCandidate()
+		rec.keys.SetKeys(ks)
+		rec.servers = srvs
+		rec.profile.ResolutionState = resolutionOf(len(ks))
 		if had {
 			if _, err := rec.keys.SelectCandidate(prev.KeyID, prev.ServerID); err != nil && len(ks) > 0 {
 				_, _ = rec.keys.SelectCandidate(ks[0].ID, ks[0].ServerID)

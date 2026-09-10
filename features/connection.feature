@@ -74,3 +74,24 @@ Feature: Connection
     Then status connection is failed
     And errorClass is one of INVALID_VLESS_USER_ID INVALID_REALITY_PUBLIC_KEY INVALID_REALITY_SHORT_ID XRAY_CONFIG_REJECTED
     And the credential value is absent from status and errors
+
+  @BTKN-CONN-013 @P0 @connection
+  Scenario: Unresolved BlackKey profile fails with BLACKKEY_RESOLUTION_REQUIRED
+    Given an imported BlackKey profile with only bootstrap Reality payload
+    When connect runs
+    Then it fails with BLACKKEY_RESOLUTION_REQUIRED
+    And errorClass is not INVALID_REALITY_PUBLIC_KEY
+
+  @BTKN-CONN-014 @P0 @connection
+  Scenario: Candidate loop skips failed candidate and promotes first healthy candidate to LKG
+    Given a resolved profile with two VLESS WS TLS candidates
+    When connect run-test fails for the first candidate and the second is healthy
+    Then Xray is connected on the second candidate
+    And that candidate is last-known-good
+
+  @BTKN-CONN-015 @P0 @connection
+  Scenario: Restart restores resolved candidates and LKG without provider refetch
+    Given a resolved profile with last-known-good after a successful connect
+    When a new Service opens the same DataDir with the fixture closed
+    Then resolved candidates and LKG are restored
+    And connect does not fetch the provider

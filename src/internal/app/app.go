@@ -84,6 +84,7 @@ func New(cfg Config) (*App, error) {
 			Profiles: ps,
 			Engine:   connection.NewXrayEngine(&xray.Runner{Executable: xrayPath}),
 			DataDir:  cfg.DataDir,
+			Probe:    connection.NewRealProbe(),
 		})
 		if prof == nil {
 			prof = connection.NewProfileAPI(ps)

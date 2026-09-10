@@ -87,18 +87,20 @@ type storeFile struct {
 }
 
 type profileStore struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	SubscriptionID string          `json:"subscriptionId"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	Subscription   subStore        `json:"subscription"`
-	Keys           []keyStore      `json:"keys"`
-	Servers        []serverStore   `json:"servers"`
-	Active         *candidateStore `json:"activeCandidate,omitempty"`
-	HasActive      bool            `json:"hasActive"`
-	LKG            *lkgStore       `json:"lastKnownGood,omitempty"`
-	HasLKG         bool            `json:"hasLastKnownGood"`
-	RotateAt       int             `json:"rotateAt,omitempty"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	SubscriptionID  string          `json:"subscriptionId"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	SourceKind      string          `json:"sourceKind,omitempty"`
+	ResolutionState string          `json:"resolutionState,omitempty"`
+	Subscription    subStore        `json:"subscription"`
+	Keys            []keyStore      `json:"keys"`
+	Servers         []serverStore   `json:"servers"`
+	Active          *candidateStore `json:"activeCandidate,omitempty"`
+	HasActive       bool            `json:"hasActive"`
+	LKG             *lkgStore       `json:"lastKnownGood,omitempty"`
+	HasLKG          bool            `json:"hasLastKnownGood"`
+	RotateAt        int             `json:"rotateAt,omitempty"`
 }
 
 type subStore struct {
@@ -246,10 +248,12 @@ func encodeStore(m *memory) ([]byte, error) {
 func encodeProfile(rec *record) profileStore {
 	snap := rec.keys.Export()
 	ps := profileStore{
-		ID:             rec.profile.ID,
-		Name:           rec.profile.Name,
-		SubscriptionID: rec.profile.SubscriptionID,
-		CreatedAt:      rec.profile.CreatedAt,
+		ID:              rec.profile.ID,
+		Name:            rec.profile.Name,
+		SubscriptionID:  rec.profile.SubscriptionID,
+		CreatedAt:       rec.profile.CreatedAt,
+		SourceKind:      rec.profile.SourceKind,
+		ResolutionState: rec.profile.ResolutionState,
 		Subscription: subStore{
 			ID:          rec.sub.ID,
 			ProfileID:   rec.sub.ProfileID,
@@ -421,12 +425,28 @@ func decodeProfile(p profileStore) (*record, error) {
 		FetchedAt:   p.Subscription.FetchedAt,
 	}
 	sub = subscription.WithSource(sub, p.Subscription.Source)
+	pkind := p.SourceKind
+	if pkind == "" {
+		if p.Subscription.Kind == "url" {
+			pkind = SourceKindBlackKey
+		} else if p.Subscription.Kind == "json" {
+			pkind = SourceKindJSON
+		} else {
+			pkind = SourceKindShare
+		}
+	}
+	pres := p.ResolutionState
+	if pres == "" {
+		pres = resolutionOf(len(ks))
+	}
 	return &record{
 		profile: Profile{
-			ID:             p.ID,
-			Name:           p.Name,
-			SubscriptionID: p.SubscriptionID,
-			CreatedAt:      p.CreatedAt,
+			ID:              p.ID,
+			Name:            p.Name,
+			SubscriptionID:  p.SubscriptionID,
+			CreatedAt:       p.CreatedAt,
+			SourceKind:      pkind,
+			ResolutionState: pres,
 		},
 		sub:     sub,
 		keys:    keys.ImportState(snap),

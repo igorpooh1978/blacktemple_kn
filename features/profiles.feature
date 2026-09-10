@@ -96,6 +96,20 @@ Feature: Profiles and BlackKey
     When a later mutation cannot persist
     Then memory and disk keep the previous good state
 
+  @BTKN-PROF-018 @P0 @profiles
+  Scenario: BlackKey bootstrap entry is not published as runnable server
+    Given a BlackKey URL body with one VLESS Reality share whose pbk is not X25519
+    When Import runs
+    Then the profile is stored as unresolved bootstrap
+    And no runnable key or server is published from that entry
+
+  @BTKN-PROF-019 @P0 @profiles
+  Scenario: Resolved Android VLESS WS TLS candidate imports durably
+    Given an unresolved BlackKey profile
+    When resolved VLESS WS TLS candidates are imported from a StartLoop-shaped JSON
+    Then runnable candidates persist across Service recreate without provider refetch
+    And Reality outbounds are not imported
+
   @BTKN-PROF-017 @P0 @profiles
   Scenario: Subscription URL path credentials never appear in diagnostics
     Given a fixture URL https://USERINFO_SECRET_MARKER@provider.invalid/sub/PATH_SECRET_MARKER?token=QUERY_SECRET_MARKER#FRAGMENT_SECRET_MARKER

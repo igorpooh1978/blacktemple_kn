@@ -48,6 +48,8 @@ func codeControl(err error) error {
 		errors.Is(err, xray.ErrInvalidRealityPublicKey),
 		errors.Is(err, xray.ErrInvalidRealityShortID):
 		return &codedError{status: http.StatusBadRequest, msg: publicError(err), cause: err}
+	case errors.Is(err, ErrBlackKeyResolutionRequired):
+		return &codedError{status: http.StatusConflict, msg: publicError(err), cause: err}
 	case errors.Is(err, ErrMissingXray),
 		errors.Is(err, ErrStart):
 		return &codedError{status: http.StatusInternalServerError, msg: publicError(err), cause: err}

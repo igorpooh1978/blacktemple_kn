@@ -170,8 +170,9 @@ func buildStream(transport, streamSecurity string, params OutboundParams) (*stre
 	switch streamSecurity {
 	case "tls":
 		tls := &tlsSettings{
-			ServerName:  params.SNI,
-			Fingerprint: fp,
+			ServerName:    params.SNI,
+			Fingerprint:   fp,
+			AllowInsecure: params.AllowInsecure,
 		}
 		if len(params.ALPN) > 0 {
 			tls.ALPN = append([]string(nil), params.ALPN...)
@@ -389,9 +390,10 @@ type streamSettings struct {
 }
 
 type tlsSettings struct {
-	ServerName  string   `json:"serverName,omitempty"`
-	Fingerprint string   `json:"fingerprint,omitempty"`
-	ALPN        []string `json:"alpn,omitempty"`
+	ServerName    string   `json:"serverName,omitempty"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+	ALPN          []string `json:"alpn,omitempty"`
+	AllowInsecure bool     `json:"allowInsecure,omitempty"`
 }
 
 type realitySettings struct {
