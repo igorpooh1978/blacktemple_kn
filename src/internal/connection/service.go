@@ -49,9 +49,10 @@ type Service struct {
 	listenPort int
 	configPath string
 
-	mu       sync.Mutex
-	lastErr  string
-	lkgStage string
+	mu        sync.Mutex
+	lastErr   string
+	lastClass string
+	lkgStage  string
 }
 
 func New(cfg Config) *Service {
@@ -123,9 +124,11 @@ func (s *Service) Control(ctx context.Context, op string) error {
 	}
 	if err != nil {
 		s.lastErr = publicError(err)
+		s.lastClass = classifyControl(err)
 		return codeControl(err)
 	}
 	s.lastErr = ""
+	s.lastClass = ""
 	return nil
 }
 
@@ -313,6 +316,7 @@ func (s *Service) Status() api.Status {
 	snap := s.sup.Snapshot()
 	s.mu.Lock()
 	lastErr := s.lastErr
+	lastClass := s.lastClass
 	s.mu.Unlock()
 
 	st := api.Status{
@@ -323,6 +327,7 @@ func (s *Service) Status() api.Status {
 		ServerMode: "auto",
 		Key:        "missing",
 		Geodata:    "missing",
+		ErrorClass: lastClass,
 		Xray: api.XrayProcess{
 			State:        string(snap.State),
 			PID:          snap.PID,
@@ -405,7 +410,28 @@ func publicError(err error) string {
 		return "unsupported in current environment"
 	case errors.Is(err, ErrNotConnected):
 		return "not connected"
+	case errors.Is(err, xray.ErrInvalidVLESSUserID):
+		return "invalid vless user id"
+	case errors.Is(err, xray.ErrInvalidRealityPublicKey):
+		return "invalid reality public key"
+	case errors.Is(err, xray.ErrInvalidRealityShortID):
+		return "invalid reality short id"
 	default:
 		return "control failed"
+	}
+}
+
+func classifyControl(err error) string {
+	switch {
+	case errors.Is(err, xray.ErrInvalidVLESSUserID):
+		return xray.ClassInvalidVLESSUserID
+	case errors.Is(err, xray.ErrInvalidRealityPublicKey):
+		return xray.ClassInvalidRealityPublicKey
+	case errors.Is(err, xray.ErrInvalidRealityShortID):
+		return xray.ClassInvalidRealityShortID
+	case errors.Is(err, ErrValidate):
+		return xray.ClassXrayConfigRejected
+	default:
+		return ""
 	}
 }

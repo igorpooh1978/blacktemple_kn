@@ -178,8 +178,8 @@ func TestMalformedProfile(t *testing.T) {
 		{
 			name:    "malformed uuid",
 			profile: fixtureProfile("tcp", "tls"),
-			secrets: ConfigSecrets{UUID: "not-a-uuid"}, params: okParams,
-			sub: "uuid is malformed",
+			secrets: ConfigSecrets{UUID: strings.Repeat("a", 31)}, params: okParams,
+			sub: "invalid vless user id",
 		},
 		{
 			name:    "reality without publicKey",

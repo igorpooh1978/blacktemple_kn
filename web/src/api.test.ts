@@ -81,6 +81,22 @@ describe("parseStatus", () => {
       })?.connection,
     ).toBe("disconnected");
   });
+
+  it("keeps errorClass as a class name without credential values", () => {
+    const parsed = parseStatus({
+      connection: "failed",
+      routing: "smart",
+      serverMode: "auto",
+      errorClass: "INVALID_REALITY_PUBLIC_KEY",
+    });
+    expect(parsed?.errorClass).toBe("INVALID_REALITY_PUBLIC_KEY");
+    expect(parseStatus({
+      connection: "failed",
+      routing: "smart",
+      serverMode: "auto",
+      errorClass: "publicKey=abcde",
+    })?.errorClass).toBeUndefined();
+  });
 });
 
 describe("auth state", () => {

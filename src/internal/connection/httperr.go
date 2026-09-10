@@ -6,6 +6,7 @@ import (
 
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/profiles"
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/subscription"
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/xray"
 )
 
 type codedError struct {
@@ -42,7 +43,10 @@ func codeControl(err error) error {
 		errors.Is(err, ErrNoCandidate),
 		errors.Is(err, ErrUnsupportedProtocol),
 		errors.Is(err, ErrValidate),
-		errors.Is(err, ErrNotConnected):
+		errors.Is(err, ErrNotConnected),
+		errors.Is(err, xray.ErrInvalidVLESSUserID),
+		errors.Is(err, xray.ErrInvalidRealityPublicKey),
+		errors.Is(err, xray.ErrInvalidRealityShortID):
 		return &codedError{status: http.StatusBadRequest, msg: publicError(err), cause: err}
 	case errors.Is(err, ErrMissingXray),
 		errors.Is(err, ErrStart):

@@ -50,6 +50,7 @@ type Status struct {
 	ServerMode string      `json:"serverMode"`
 	Key        string      `json:"key"`
 	Geodata    string      `json:"geodata"`
+	ErrorClass string      `json:"errorClass,omitempty"`
 	Xray       XrayProcess `json:"xray"`
 }
 

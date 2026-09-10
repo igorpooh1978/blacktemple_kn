@@ -574,6 +574,63 @@
       "tests": ["src/internal/xray/runner_test.go::TestDetachStdioUsesOSDevNull"],
       "redProof": "RED: TestDetachStdioUsesOSDevNull FAIL while detached Start binds child stdio to parent io.Discard; GREEN after OS devnull files"
     },
+    "BTKN-XRAY-009": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/userid_test.go::TestShortVLESSUserIDAccepted"],
+      "redProof": "RED on b04f352: TestShortVLESSUserIDAccepted FAIL uuid is malformed for 4-byte id"
+    },
+    "BTKN-XRAY-010": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/xray/userid_test.go::TestFourByteVLESSUserIDUnchangedInConfig",
+        "src/internal/xray/userid_test.go::TestFourByteVLESSUserIDXRayTest"
+      ],
+      "redProof": "RED on b04f352: TestFourByteVLESSUserIDUnchangedInConfig FAIL uuid is malformed"
+    },
+    "BTKN-XRAY-011": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/userid_test.go::TestCanonicalUUIDUnchanged"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: canonical UUID already accepted by TestGoldenConfigs; this scenario guards against regression"
+    },
+    "BTKN-XRAY-012": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/userid_test.go::TestEmptyVLESSUserIDRejected"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: empty id already rejected; keep fail-closed"
+    },
+    "BTKN-XRAY-013": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/xray/userid_test.go::TestThirtyByteVLESSUserIDAccepted",
+        "src/internal/xray/userid_test.go::TestThirtyOneByteVLESSUserIDRejected"
+      ],
+      "redProof": "RED on b04f352: TestThirtyByteVLESSUserIDAccepted FAIL uuid is malformed"
+    },
+    "BTKN-XRAY-014": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/userid_test.go::TestShortVLESSUserIDNotRegenerated"],
+      "redProof": "RED on b04f352: TestShortVLESSUserIDNotRegenerated FAIL uuid is malformed before emit"
+    },
+    "BTKN-XRAY-015": {
+      "priority": "P0",
+      "tests": ["src/internal/xray/userid_test.go::TestVLESSUserIDAbsentFromErrors"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: leaking the live id would be an unsafe RED mutation"
+    },
+    "BTKN-XRAY-016": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/xray/userid_test.go::TestValidRealityPublicKeyAccepted",
+        "src/internal/xray/userid_test.go::TestMalformedRealityPublicKeyClassified"
+      ],
+      "redProof": "RED on b04f352: TestMalformedRealityPublicKeyClassified FAIL while 5-char dummy is only checked for non-empty"
+    },
+    "BTKN-XRAY-017": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/xray/userid_test.go::TestEmptyRealityShortIDAllowed",
+        "src/internal/xray/userid_test.go::TestInvalidRealityShortIDClassified"
+      ],
+      "redProof": "RED on b04f352: TestInvalidRealityShortIDClassified FAIL until shortId structure is classified"
+    },
     "BTKN-ROUT-018": {
       "priority": "P0",
       "tests": ["src/internal/platform/nfcmd_test.go::TestReconcileApplyRefusesXKeenWithZeroMutations"],
@@ -842,6 +899,11 @@
       "priority": "P0",
       "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSGeneratedConfigXrayTest"],
       "redProof": "RED: TestSOCKSGeneratedConfigXrayTest FAIL/skip until SOCKS-only config is generated; live binary optional"
+    },
+    "BTKN-CONN-012": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/classify_test.go::TestConnectClassifiesCredentialFailures"],
+      "redProof": "RED on b04f352: TestConnectClassifiesCredentialFailures FAIL until Status.errorClass is populated"
     },
     "BTKN-KEYS-001": {
       "priority": "P0",

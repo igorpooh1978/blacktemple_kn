@@ -58,6 +58,13 @@ export function AdvancedScreen(props: {
           title="Перезапусков"
           value={restarts}
         />
+        {props.status.errorClass ? (
+          <SettingRow
+            icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+            title="Класс ошибки"
+            value={props.status.errorClass}
+          />
+        ) : null}
       </Card>
     </main>
   );

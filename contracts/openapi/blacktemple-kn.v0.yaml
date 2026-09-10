@@ -166,6 +166,14 @@ components:
         geodata:
           type: string
           enum: [missing, current, stale, unknown]
+        errorClass:
+          type: string
+          enum:
+            - INVALID_VLESS_USER_ID
+            - INVALID_REALITY_PUBLIC_KEY
+            - INVALID_REALITY_SHORT_ID
+            - XRAY_CONFIG_REJECTED
+          description: credential or xray-test class; never includes secret values
         xray:
           $ref: "#/components/schemas/XrayProcess"
     XrayProcess:

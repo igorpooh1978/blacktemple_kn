@@ -25,6 +25,12 @@ export type XrayProcess = {
   restartCount?: number;
 };
 
+export type ConnectionErrorClass =
+  | "INVALID_VLESS_USER_ID"
+  | "INVALID_REALITY_PUBLIC_KEY"
+  | "INVALID_REALITY_SHORT_ID"
+  | "XRAY_CONFIG_REJECTED";
+
 export type Status = {
   connection: ConnectionState;
   country?: string;
@@ -33,6 +39,7 @@ export type Status = {
   serverMode: ServerMode;
   key?: KeyState;
   geodata?: string;
+  errorClass?: ConnectionErrorClass;
   xray?: XrayProcess;
 };
 
@@ -89,6 +96,15 @@ function isServerMode(v: unknown): v is ServerMode {
   );
 }
 
+function isConnectionErrorClass(v: unknown): v is ConnectionErrorClass {
+  return (
+    v === "INVALID_VLESS_USER_ID" ||
+    v === "INVALID_REALITY_PUBLIC_KEY" ||
+    v === "INVALID_REALITY_SHORT_ID" ||
+    v === "XRAY_CONFIG_REJECTED"
+  );
+}
+
 function isKeyState(v: unknown): v is KeyState {
   return v === "missing" || v === "active" || v === "invalid";
 }
@@ -132,6 +148,9 @@ export function parseStatus(data: unknown): Status | null {
   }
   if (typeof o.geodata === "string") {
     status.geodata = o.geodata;
+  }
+  if (isConnectionErrorClass(o.errorClass)) {
+    status.errorClass = o.errorClass;
   }
   if (o.xray !== null && typeof o.xray === "object") {
     const x = o.xray as Record<string, unknown>;

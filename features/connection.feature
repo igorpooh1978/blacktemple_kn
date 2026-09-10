@@ -66,3 +66,11 @@ Feature: Connection
     Given a VLESS Reality or TLS candidate
     When SOCKS-only xray.json is generated
     Then xray run -test accepts it where the binary is available
+
+  @BTKN-CONN-012 @P0 @connection
+  Scenario: Failed connect classifies credential errors without values
+    Given generate or xray run -test rejects a candidate
+    When connect fails
+    Then status connection is failed
+    And errorClass is one of INVALID_VLESS_USER_ID INVALID_REALITY_PUBLIC_KEY INVALID_REALITY_SHORT_ID XRAY_CONFIG_REJECTED
+    And the credential value is absent from status and errors

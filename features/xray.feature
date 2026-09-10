@@ -47,3 +47,63 @@ Feature: Xray configuration
     Given blacktempled xray-start with Detach
     Then child stdout and stderr are OS devnull files
     And they are not the parent io.Discard pipe
+
+  @BTKN-XRAY-009 @P0 @xray
+  Scenario: VLESS short user id is accepted per Xray mapping semantics
+    Given a 4-byte UTF-8 VLESS user id
+    When generate runs
+    Then the config is emitted without converting the id to a UUID
+
+  @BTKN-XRAY-010 @P0 @xray
+  Scenario: Four-byte VLESS provider id reaches xray config validation
+    Given id "test" and otherwise valid dummy TLS or Reality parameters
+    When generate writes xray.json
+    Then the JSON users.id is exactly that 4-byte value
+    And xray run -test is attempted where the pinned binary is available
+
+  @BTKN-XRAY-011 @P0 @xray
+  Scenario: Canonical UUID VLESS id remains accepted unchanged
+    Given a canonical RFC-style UUID
+    When generate runs
+    Then the users.id field is the same UUID
+
+  @BTKN-XRAY-012 @P0 @xray
+  Scenario: Empty VLESS user id is rejected
+    Given an empty or whitespace-only VLESS id
+    When generate runs
+    Then the config is rejected
+
+  @BTKN-XRAY-013 @P0 @xray
+  Scenario: Arbitrary VLESS id longer than 30 UTF-8 bytes is rejected
+    Given a 31-byte non-UUID VLESS id
+    When generate runs
+    Then the config is rejected
+    And a 30-byte non-UUID id is accepted
+
+  @BTKN-XRAY-014 @P0 @xray
+  Scenario: Short VLESS id is never regenerated because it is not UUID-shaped
+    Given id "test"
+    When generate runs
+    Then users.id is "test"
+    And no new UUID is substituted
+    And KeyChanger is not invoked
+
+  @BTKN-XRAY-015 @P0 @xray
+  Scenario: Secret VLESS user id never appears in logs status or errors
+    Given a short or canonical VLESS id
+    When generate fails or succeeds
+    Then errors and status do not contain the id value
+
+  @BTKN-XRAY-016 @P0 @xray
+  Scenario: Reality public key is classified by X25519 structure
+    Given a test X25519 public key encoded as Xray base64url
+    When generate runs
+    Then the key is accepted
+    And a 5-character dummy is classified invalid without logging the value
+
+  @BTKN-XRAY-017 @P0 @xray
+  Scenario: Reality shortId empty is allowed and odd hex is rejected
+    Given Reality security
+    When shortId is empty
+    Then generate accepts it
+    And a structurally invalid shortId is classified without emitting the value
