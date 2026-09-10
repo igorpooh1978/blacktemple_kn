@@ -35,6 +35,7 @@ type Config struct {
 	ListenHost  string
 	ListenPort  int
 	FastBackoff bool
+	Probe       TunnelProbe
 }
 
 // Service is the single ConnectionService between profiles, Xray, and supervisor.
@@ -48,10 +49,12 @@ type Service struct {
 	listenHost string
 	listenPort int
 	configPath string
+	probe      TunnelProbe
 
-	mu       sync.Mutex
-	lastErr  string
-	lkgStage string
+	mu        sync.Mutex
+	lastErr   string
+	lastClass string
+	lkgStage  string
 }
 
 func New(cfg Config) *Service {
@@ -94,6 +97,7 @@ func New(cfg Config) *Service {
 		listenHost: cfg.ListenHost,
 		listenPort: cfg.ListenPort,
 		configPath: path,
+		probe:      cfg.Probe,
 	}
 }
 
@@ -123,44 +127,107 @@ func (s *Service) Control(ctx context.Context, op string) error {
 	}
 	if err != nil {
 		s.lastErr = publicError(err)
+		s.lastClass = classifyControl(err)
 		return codeControl(err)
 	}
 	s.lastErr = ""
+	s.lastClass = ""
 	return nil
 }
 
 func (s *Service) connectLocked(ctx context.Context) error {
-	raw, err := s.generateLocked()
+	profileID := s.profiles.ActiveID()
+	if profileID == "" {
+		return ErrNoProfile
+	}
+	p, err := s.profiles.Get(profileID)
 	if err != nil {
 		return err
 	}
-	if err := s.installConfigLocked(ctx, raw); err != nil {
+	ks, err := s.profiles.Keys(profileID)
+	if err != nil {
 		return err
 	}
-	s.lkgStage = lkgConfigValidated
-	st := s.sup.State()
-	if st == supervisor.StateRunning || st == supervisor.StateStarting || st == supervisor.StateReloading {
-		if err := s.sup.RestartVPN(ctx); err != nil {
-			_ = restoreBackup(s.configPath)
-			s.adapter.SetConfigPath(s.configPath)
-			return fmt.Errorf("%w: %v", ErrStart, err)
+	if len(ks) == 0 {
+		if p.ResolutionState == profiles.ResolutionUnresolved || p.SourceKind == profiles.SourceKindBlackKey {
+			return ErrBlackKeyResolutionRequired
 		}
-	} else {
-		if err := s.sup.Start(ctx); err != nil {
-			_ = restoreBackup(s.configPath)
-			s.adapter.SetConfigPath(s.configPath)
-			return fmt.Errorf("%w: %v", ErrStart, err)
+		return ErrNoCandidate
+	}
+	srvs, err := s.profiles.Servers(profileID)
+	if err != nil {
+		return err
+	}
+	order := s.candidateOrder(profileID, ks, srvs)
+	if len(order) == 0 {
+		if hasNonVLESS(ks) {
+			return ErrUnsupportedProtocol
 		}
+		if p.ResolutionState == profiles.ResolutionUnresolved || p.SourceKind == profiles.SourceKindBlackKey {
+			return ErrBlackKeyResolutionRequired
+		}
+		return ErrNoCandidate
 	}
-	if s.sup.State() != supervisor.StateRunning {
-		return ErrStart
-	}
-	s.lkgStage = lkgProcessRunning
-	profileID := s.profiles.ActiveID()
-	if profileID != "" {
+	var last error
+	attempts := 0
+	for _, pair := range order {
+		if attempts >= maxCandidateAttempts {
+			break
+		}
+		attempts++
+		raw, err := s.generatePair(p, pair.key, pair.srv)
+		if err != nil {
+			last = err
+			continue
+		}
+		if err := s.installConfigLocked(ctx, raw); err != nil {
+			last = err
+			continue
+		}
+		s.lkgStage = lkgConfigValidated
+		st := s.sup.State()
+		if st == supervisor.StateRunning || st == supervisor.StateStarting || st == supervisor.StateReloading {
+			if err := s.sup.RestartVPN(ctx); err != nil {
+				_ = restoreBackup(s.configPath)
+				s.adapter.SetConfigPath(s.configPath)
+				last = fmt.Errorf("%w: %v", ErrStart, err)
+				continue
+			}
+		} else {
+			if err := s.sup.Start(ctx); err != nil {
+				_ = restoreBackup(s.configPath)
+				s.adapter.SetConfigPath(s.configPath)
+				last = fmt.Errorf("%w: %v", ErrStart, err)
+				continue
+			}
+		}
+		if s.sup.State() != supervisor.StateRunning {
+			last = ErrStart
+			_ = s.sup.Stop(ctx)
+			continue
+		}
+		s.lkgStage = lkgProcessRunning
+		if s.probe != nil {
+			if err := s.probe.WaitListener(ctx, s.listenHost, s.listenPort); err != nil {
+				_ = s.sup.Stop(ctx)
+				last = err
+				continue
+			}
+			if err := s.probe.Check(ctx, s.listenHost, s.listenPort); err != nil {
+				_ = s.sup.Stop(ctx)
+				last = err
+				continue
+			}
+			s.lkgStage = lkgNetworkVerified
+		}
+		_, _ = s.profiles.SelectCandidate(profileID, pair.key.ID, pair.srv.ID)
 		_, _ = s.profiles.CommitLastKnownGood(profileID)
+		return nil
 	}
-	return nil
+	if last != nil {
+		return last
+	}
+	return ErrNoCandidate
 }
 
 func (s *Service) disconnectLocked(ctx context.Context) error {
@@ -176,21 +243,7 @@ func (s *Service) reconnectLocked(ctx context.Context) error {
 			return err
 		}
 	}
-	raw, err := s.generateLocked()
-	if err != nil {
-		return err
-	}
-	if err := s.installConfigLocked(ctx, raw); err != nil {
-		return err
-	}
-	s.lkgStage = lkgConfigValidated
-	if err := s.sup.Start(ctx); err != nil {
-		_ = restoreBackup(s.configPath)
-		s.adapter.SetConfigPath(s.configPath)
-		return fmt.Errorf("%w: %v", ErrStart, err)
-	}
-	s.lkgStage = lkgProcessRunning
-	return nil
+	return s.connectLocked(ctx)
 }
 
 func (s *Service) restartVPNLocked(ctx context.Context) error {
@@ -229,17 +282,18 @@ func (s *Service) generateLocked() ([]byte, error) {
 	}
 	secrets := xray.ConfigSecrets{UUID: key.Material()}
 	out := xray.OutboundParams{
-		Flow:        params.Flow,
-		SNI:         params.SNI,
-		PublicKey:   params.RealityPublicKey,
-		ShortID:     params.ShortID,
-		Fingerprint: params.Fingerprint,
-		SpiderX:     params.SpiderX,
-		Path:        params.Path,
-		Host:        params.Host,
-		ServiceName: params.ServiceName,
-		ALPN:        append([]string(nil), params.ALPN...),
-		Mode:        params.Mode,
+		Flow:          params.Flow,
+		SNI:           params.SNI,
+		PublicKey:     params.RealityPublicKey,
+		ShortID:       params.ShortID,
+		Fingerprint:   params.Fingerprint,
+		SpiderX:       params.SpiderX,
+		Path:          params.Path,
+		Host:          params.Host,
+		ServiceName:   params.ServiceName,
+		ALPN:          append([]string(nil), params.ALPN...),
+		Mode:          params.Mode,
+		AllowInsecure: params.AllowInsecure,
 	}
 	raw, err := xray.Generate(xp, secrets, out, xray.Options{
 		ListenHost: s.listenHost,
@@ -284,9 +338,105 @@ func (s *Service) resolveVLESS(profileID string) (keys.Key, servers.Server, erro
 		return k, srv, nil
 	}
 	if len(ks) == 0 {
+		p, err := s.profiles.Get(profileID)
+		if err == nil && (p.ResolutionState == profiles.ResolutionUnresolved || p.SourceKind == profiles.SourceKindBlackKey) {
+			return keys.Key{}, servers.Server{}, ErrBlackKeyResolutionRequired
+		}
 		return keys.Key{}, servers.Server{}, ErrNoCandidate
 	}
 	return keys.Key{}, servers.Server{}, ErrUnsupportedProtocol
+}
+
+type candidatePair struct {
+	key keys.Key
+	srv servers.Server
+}
+
+func (s *Service) generatePair(p profiles.Profile, key keys.Key, srv servers.Server) ([]byte, error) {
+	params := key.Params()
+	xp := xray.Profile{
+		ID:        p.ID,
+		Name:      p.Name,
+		Protocol:  key.Protocol,
+		Server:    srv.Host,
+		Port:      srv.Port,
+		Transport: srv.Transport,
+		Security:  srv.Security,
+		Country:   srv.CountryID,
+	}
+	secrets := xray.ConfigSecrets{UUID: key.Material()}
+	out := xray.OutboundParams{
+		Flow:          params.Flow,
+		SNI:           params.SNI,
+		PublicKey:     params.RealityPublicKey,
+		ShortID:       params.ShortID,
+		Fingerprint:   params.Fingerprint,
+		SpiderX:       params.SpiderX,
+		Path:          params.Path,
+		Host:          params.Host,
+		ServiceName:   params.ServiceName,
+		ALPN:          append([]string(nil), params.ALPN...),
+		Mode:          params.Mode,
+		AllowInsecure: params.AllowInsecure,
+	}
+	raw, err := xray.Generate(xp, secrets, out, xray.Options{
+		ListenHost: s.listenHost,
+		ListenPort: s.listenPort,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "not generated") || strings.Contains(err.Error(), "unsupported") {
+			return nil, fmt.Errorf("%w: %v", ErrUnsupportedProtocol, err)
+		}
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (s *Service) candidateOrder(profileID string, ks []keys.Key, srvs []servers.Server) []candidatePair {
+	var out []candidatePair
+	seen := map[string]struct{}{}
+	push := func(k keys.Key, srv servers.Server) {
+		if !strings.EqualFold(k.Protocol, "vless") {
+			return
+		}
+		id := k.ID + ":" + srv.ID
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, candidatePair{key: k, srv: srv})
+	}
+	if lkg, err := s.profiles.LastKnownGood(profileID); err == nil {
+		if k, ok := findKey(ks, lkg.KeyID); ok {
+			if srv, err := findServerByID(srvs, lkg.ServerID); err == nil {
+				push(k, srv)
+			}
+		}
+	}
+	if cand, err := s.profiles.Candidate(profileID); err == nil {
+		if k, ok := findKey(ks, cand.KeyID); ok {
+			if srv, err := findServerByID(srvs, cand.ServerID); err == nil {
+				push(k, srv)
+			}
+		}
+	}
+	for _, k := range ks {
+		srv, err := findServerByID(srvs, k.ServerID)
+		if err != nil {
+			continue
+		}
+		push(k, srv)
+	}
+	return out
+}
+
+func hasNonVLESS(ks []keys.Key) bool {
+	for _, k := range ks {
+		if !strings.EqualFold(k.Protocol, "vless") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) installConfigLocked(ctx context.Context, raw []byte) error {
@@ -313,6 +463,7 @@ func (s *Service) Status() api.Status {
 	snap := s.sup.Snapshot()
 	s.mu.Lock()
 	lastErr := s.lastErr
+	lastClass := s.lastClass
 	s.mu.Unlock()
 
 	st := api.Status{
@@ -323,6 +474,7 @@ func (s *Service) Status() api.Status {
 		ServerMode: "auto",
 		Key:        "missing",
 		Geodata:    "missing",
+		ErrorClass: lastClass,
 		Xray: api.XrayProcess{
 			State:        string(snap.State),
 			PID:          snap.PID,
@@ -391,6 +543,8 @@ func publicError(err error) string {
 	switch {
 	case errors.Is(err, ErrNoProfile):
 		return "no profile"
+	case errors.Is(err, ErrBlackKeyResolutionRequired):
+		return "blackkey resolution required"
 	case errors.Is(err, ErrNoCandidate):
 		return "no candidate"
 	case errors.Is(err, ErrUnsupportedProtocol):
@@ -405,7 +559,30 @@ func publicError(err error) string {
 		return "unsupported in current environment"
 	case errors.Is(err, ErrNotConnected):
 		return "not connected"
+	case errors.Is(err, xray.ErrInvalidVLESSUserID):
+		return "invalid vless user id"
+	case errors.Is(err, xray.ErrInvalidRealityPublicKey):
+		return "invalid reality public key"
+	case errors.Is(err, xray.ErrInvalidRealityShortID):
+		return "invalid reality short id"
 	default:
 		return "control failed"
+	}
+}
+
+func classifyControl(err error) string {
+	switch {
+	case errors.Is(err, ErrBlackKeyResolutionRequired):
+		return ClassBlackKeyResolutionRequired
+	case errors.Is(err, xray.ErrInvalidVLESSUserID):
+		return xray.ClassInvalidVLESSUserID
+	case errors.Is(err, xray.ErrInvalidRealityPublicKey):
+		return xray.ClassInvalidRealityPublicKey
+	case errors.Is(err, xray.ErrInvalidRealityShortID):
+		return xray.ClassInvalidRealityShortID
+	case errors.Is(err, ErrValidate):
+		return xray.ClassXrayConfigRejected
+	default:
+		return ""
 	}
 }

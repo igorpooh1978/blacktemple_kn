@@ -170,8 +170,9 @@ func buildStream(transport, streamSecurity string, params OutboundParams) (*stre
 	switch streamSecurity {
 	case "tls":
 		tls := &tlsSettings{
-			ServerName:  params.SNI,
-			Fingerprint: fp,
+			ServerName:    params.SNI,
+			Fingerprint:   fp,
+			AllowInsecure: params.AllowInsecure,
 		}
 		if len(params.ALPN) > 0 {
 			tls.ALPN = append([]string(nil), params.ALPN...)
@@ -246,10 +247,10 @@ func validateProfile(profile Profile, secrets ConfigSecrets, params OutboundPara
 	}
 
 	if strings.TrimSpace(secrets.UUID) == "" {
-		return fmt.Errorf("uuid is required (not in frozen profile schema; pass ConfigSecrets)")
+		return fmt.Errorf("%w: uuid is required (not in frozen profile schema; pass ConfigSecrets)", ErrInvalidVLESSUserID)
 	}
-	if !validUUID(secrets.UUID) {
-		return fmt.Errorf("uuid is malformed")
+	if !validVLESSUserID(secrets.UUID) {
+		return fmt.Errorf("%w", ErrInvalidVLESSUserID)
 	}
 
 	if params.Flow != "" && params.Flow != visionFlow {
@@ -258,10 +259,16 @@ func validateProfile(profile Profile, secrets ConfigSecrets, params OutboundPara
 
 	if profile.Security == "reality" {
 		if strings.TrimSpace(params.PublicKey) == "" {
-			return fmt.Errorf("reality publicKey is required (not in frozen profile schema; pass OutboundParams)")
+			return fmt.Errorf("%w: reality publicKey is required (not in frozen profile schema; pass OutboundParams)", ErrInvalidRealityPublicKey)
+		}
+		if !InspectRealityPublicKey(params.PublicKey).Valid {
+			return fmt.Errorf("%w", ErrInvalidRealityPublicKey)
 		}
 		if strings.TrimSpace(params.SNI) == "" {
 			return fmt.Errorf("reality sni is required (not in frozen profile schema; pass OutboundParams)")
+		}
+		if !InspectRealityShortID(params.ShortID).Valid {
+			return fmt.Errorf("%w", ErrInvalidRealityShortID)
 		}
 	}
 
@@ -383,9 +390,10 @@ type streamSettings struct {
 }
 
 type tlsSettings struct {
-	ServerName  string   `json:"serverName,omitempty"`
-	Fingerprint string   `json:"fingerprint,omitempty"`
-	ALPN        []string `json:"alpn,omitempty"`
+	ServerName    string   `json:"serverName,omitempty"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+	ALPN          []string `json:"alpn,omitempty"`
+	AllowInsecure bool     `json:"allowInsecure,omitempty"`
 }
 
 type realitySettings struct {

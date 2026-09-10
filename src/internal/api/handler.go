@@ -50,6 +50,7 @@ type Status struct {
 	ServerMode string      `json:"serverMode"`
 	Key        string      `json:"key"`
 	Geodata    string      `json:"geodata"`
+	ErrorClass string      `json:"errorClass,omitempty"`
 	Xray       XrayProcess `json:"xray"`
 }
 
@@ -121,6 +122,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/version", s.handleVersion)
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
+	mux.HandleFunc("GET /api/v1/auth/state", s.handleAuthState)
 	mux.HandleFunc("POST /api/v1/auth/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
@@ -165,6 +167,19 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"goarch":  v.GOARCH,
 		"gomips":  v.GOMIPS,
 		"cgo":     v.CGO,
+	})
+}
+
+func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) {
+	initialized := s.auth != nil && s.auth.Initialized()
+	authenticated := false
+	if initialized && s.auth != nil {
+		c, err := r.Cookie(sessionCookie)
+		authenticated = err == nil && c.Value != "" && s.auth.Lookup(c.Value)
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"initialized":   initialized,
+		"authenticated": authenticated,
 	})
 }
 

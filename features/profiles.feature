@@ -41,3 +41,79 @@ Feature: Profiles and BlackKey
     Given an imported URL subscription
     When Refresh download fails
     Then previously stored keys remain
+
+  @BTKN-PROF-008 @P0 @profiles
+  Scenario: Valid HTTPS BlackKey is fetched and parsed
+    Given a fixture subscription at <BLACKKEY_SUBSCRIPTION_URL>
+    When Import fetches HTTPS
+    Then entries are parsed without logging the URL token
+
+  @BTKN-PROF-009 @P0 @profiles
+  Scenario: Failed subscription fetch does not create a partial profile
+    Given a subscription URL that cannot be fetched
+    When Import runs
+    Then no profile is stored
+
+  @BTKN-PROF-010 @P0 @profiles
+  Scenario: Successful profile import survives daemon restart
+    Given DataDir persistence
+    When Import succeeds and a new Service opens the same DataDir
+    Then the profile is restored without fetching the provider
+
+  @BTKN-PROF-011 @P0 @profiles
+  Scenario: Active profile survives daemon restart
+    Given an imported active profile
+    When a new Service opens the same DataDir
+    Then ActiveID is restored
+
+  @BTKN-PROF-012 @P0 @profiles
+  Scenario: Parsed keys and servers survive restart without provider
+    Given an imported subscription
+    When the HTTP fixture is closed and Service is recreated
+    Then keys and servers are still present
+
+  @BTKN-PROF-013 @P0 @profiles
+  Scenario: Active candidate survives daemon restart
+    Given a selected candidate
+    When Service is recreated on the same DataDir
+    Then the candidate is restored
+
+  @BTKN-PROF-014 @P0 @profiles
+  Scenario: Persisted profile file is mode 0600
+    Given DataDir persistence
+    When Import writes profiles.json
+    Then the file mode is 0600
+
+  @BTKN-PROF-015 @P0 @profiles
+  Scenario: Secret URL and key material never appear in profile API status errors or logs
+    Given an imported profile
+    When API status errors and logs are inspected
+    Then the BlackKey secret and subscription token are absent
+
+  @BTKN-PROF-016 @P0 @profiles
+  Scenario: Failed persistence does not replace previous good state
+    Given a durable good profiles.json
+    When a later mutation cannot persist
+    Then memory and disk keep the previous good state
+
+  @BTKN-PROF-018 @P0 @profiles
+  Scenario: BlackKey bootstrap entry is not published as runnable server
+    Given a BlackKey URL body with one VLESS Reality share whose pbk is not X25519
+    When Import runs
+    Then the profile is stored as unresolved bootstrap
+    And no runnable key or server is published from that entry
+
+  @BTKN-PROF-019 @P0 @profiles
+  Scenario: Resolved Android VLESS WS TLS candidate imports durably
+    Given an unresolved BlackKey profile
+    When resolved VLESS WS TLS candidates are imported from a StartLoop-shaped JSON
+    Then runnable candidates persist across Service recreate without provider refetch
+    And Reality outbounds are not imported
+
+  @BTKN-PROF-017 @P0 @profiles
+  Scenario: Subscription URL path credentials never appear in diagnostics
+    Given a fixture URL https://USERINFO_SECRET_MARKER@provider.invalid/sub/PATH_SECRET_MARKER?token=QUERY_SECRET_MARKER#FRAGMENT_SECRET_MARKER
+    When Fetched Subscription Key ChangeKeyResponse and persist errors are printed or serialized
+    Then PATH_SECRET_MARKER QUERY_SECRET_MARKER FRAGMENT_SECRET_MARKER and USERINFO_SECRET_MARKER are absent
+    And percent-encoded path credentials are absent
+    And persisted profiles.json still retains the raw source for Refresh

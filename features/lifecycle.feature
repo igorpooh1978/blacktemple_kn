@@ -261,3 +261,10 @@ Feature: Service lifecycle
     When rescue restore runs
     Then it reports ALREADY_HEALTHY
     And S05xkeen start is not invoked
+
+  @BTKN-LIFE-044 @P0 @lifecycle
+  Scenario: Packaged daemon uses an absolute data directory
+    Given Entware init S99blacktemple-kn
+    When blacktempled starts
+    Then ARGS includes -data-dir /opt/blacktemple-kn/data
+    And the process does not depend on the working directory for profiles.json

@@ -22,14 +22,15 @@ func vlessShare() string {
 }
 
 type fakeEngine struct {
-	mu           sync.Mutex
-	pid          int
-	nextPID      int
-	failValidate bool
-	failStart    bool
-	waitCh       chan error
-	started      bool
-	version      string
+	mu               sync.Mutex
+	pid              int
+	nextPID          int
+	failValidate     bool
+	failValidateLeft int
+	failStart        bool
+	waitCh           chan error
+	started          bool
+	version          string
 }
 
 func (f *fakeEngine) Start(_ context.Context, _ string) error {
@@ -77,8 +78,12 @@ func (f *fakeEngine) Wait(_ context.Context) error {
 func (f *fakeEngine) ValidateConfig(_ context.Context, path string) error {
 	f.mu.Lock()
 	fail := f.failValidate
+	left := f.failValidateLeft
+	if left > 0 {
+		f.failValidateLeft--
+	}
 	f.mu.Unlock()
-	if fail {
+	if fail || left > 0 {
 		return errors.New("xray run -test: invalid")
 	}
 	b, err := os.ReadFile(path)

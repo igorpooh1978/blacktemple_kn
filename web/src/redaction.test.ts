@@ -43,6 +43,20 @@ describe("BlackKey redaction", () => {
     expect(JSON.stringify(store.dump)).not.toContain(secret);
   });
 
+  it("clears the field on 401 and does not persist the secret", async () => {
+    const store = memoryPersist();
+    const secret = "bk_session_expired_secret";
+    const request = vi.fn().mockResolvedValue({ status: 401 });
+    const result = await importBlackKey({
+      blackKey: secret,
+      request,
+      persist: store.persist,
+    });
+    expect(result.status).toBe(401);
+    expect(result.nextFieldValue).toBe("");
+    expect(storageDumpContains(store.dump, secret)).toBe(false);
+  });
+
   it("never writes blackKey into storage even if asked", () => {
     const store = memoryPersist();
     const secret = "bk_another_secret";

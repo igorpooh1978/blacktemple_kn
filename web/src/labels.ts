@@ -4,17 +4,34 @@ import type {
   RoutingMode,
   ServerMode,
 } from "./api";
+import { VPN_ENGINE_NOT_READY } from "./connection";
 
 export function connectionLabel(v: ConnectionState): string {
   switch (v) {
     case "disconnected":
-      return "Отключено";
+      return "VPN отключён";
     case "connecting":
       return "Подключение…";
     case "connected":
-      return "Подключено";
+      return "VPN подключён";
     case "failed":
-      return "Ошибка";
+      return "Ошибка подключения";
+    default: {
+      const _never: never = v;
+      return _never;
+    }
+  }
+}
+
+export function connectionActionLabel(v: ConnectionState): string {
+  switch (v) {
+    case "connected":
+      return "Отключить";
+    case "connecting":
+      return "Подключение…";
+    case "disconnected":
+    case "failed":
+      return "Подключить";
     default: {
       const _never: never = v;
       return _never;
@@ -26,9 +43,9 @@ export function keyLabel(v: KeyState | undefined): string {
   const state: KeyState = v ?? "missing";
   switch (state) {
     case "missing":
-      return "Не добавлен";
+      return "Не настроен";
     case "active":
-      return "Добавлен";
+      return "Настроен";
     case "invalid":
       return "Недействителен";
     default: {
@@ -70,19 +87,17 @@ export function routingLabel(v: RoutingMode): string {
   }
 }
 
-export function connectionDotClass(v: ConnectionState): string {
-  switch (v) {
-    case "disconnected":
-      return "dot";
-    case "connecting":
-      return "dot dot-wait";
-    case "connected":
-      return "dot dot-on";
-    case "failed":
-      return "dot dot-fail";
-    default: {
-      const _never: never = v;
-      return _never;
-    }
+export function noticeAlertTone(
+  notice: string,
+): "info" | "warning" | "success" {
+  if (notice === "Ключ добавлен") {
+    return "success";
   }
+  if (
+    notice === VPN_ENGINE_NOT_READY ||
+    notice === "Импорт ключей ещё не готов"
+  ) {
+    return "warning";
+  }
+  return "info";
 }

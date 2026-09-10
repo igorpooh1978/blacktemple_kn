@@ -1,8 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ConnectionState, Status, VersionInfo } from "./api";
 import {
+  getAuthState,
   getStatus,
   getVersion,
+  parseAuthState,
   parseStatus,
   parseVersion,
   postConnection,
@@ -14,17 +16,16 @@ import {
 import { interpretConnectionPost } from "./connection";
 import {
   defaultDisconnectedStatus,
+  importErrorMessage,
   screenAfterSetupStatus,
+  screenFromAuthState,
+  SESSION_EXPIRED_MESSAGE,
   type Screen,
 } from "./flow";
-import {
-  connectionDotClass,
-  connectionLabel,
-  keyLabel,
-  routingLabel,
-  serverLabel,
-} from "./labels";
 import { importBlackKey } from "./redaction";
+import { AdvancedScreen } from "./screens/AdvancedScreen";
+import { LoginScreen, SetupScreen } from "./screens/AuthScreens";
+import { MainScreen } from "./screens/MainScreen";
 
 const SETUP_MIN_LEN = 8;
 
@@ -41,8 +42,23 @@ export function App() {
   const [blackKey, setBlackKey] = useState("");
   const [keyName, setKeyName] = useState("");
 
+  function expireSession() {
+    setBlackKey("");
+    setKeyName("");
+    setPassword("");
+    setRepeat("");
+    setStatus(defaultDisconnectedStatus());
+    setScreen("login");
+    setError(SESSION_EXPIRED_MESSAGE);
+    setNotice("");
+  }
+
   async function loadStatus(): Promise<boolean> {
     const res = await getStatus();
+    if (res.status === 401) {
+      expireSession();
+      return false;
+    }
     if (res.status !== 200) {
       return false;
     }
@@ -57,9 +73,18 @@ export function App() {
     let cancelled = false;
     (async () => {
       try {
-        const ok = await loadStatus();
-        if (!cancelled && ok) {
-          setScreen("main");
+        const authRes = await getAuthState();
+        if (cancelled || authRes.status !== 200) {
+          return;
+        }
+        const state = parseAuthState(await readJson(authRes));
+        if (!state || cancelled) {
+          return;
+        }
+        const next = screenFromAuthState(state);
+        setScreen(next);
+        if (next === "main") {
+          await loadStatus();
         }
       } catch {
         /* daemon unreachable — stay on first-run */
@@ -75,9 +100,21 @@ export function App() {
       return;
     }
     const id = setInterval(() => {
-      loadStatus().catch(() => {
-        /* keep last GET snapshot; never invent connected */
-      });
+      (async () => {
+        try {
+          const authRes = await getAuthState();
+          if (authRes.status === 200) {
+            const state = parseAuthState(await readJson(authRes));
+            if (state && !state.authenticated) {
+              expireSession();
+              return;
+            }
+          }
+          await loadStatus();
+        } catch {
+          /* keep last GET snapshot; never invent connected */
+        }
+      })();
     }, 4000);
     return () => clearInterval(id);
   }, [screen]);
@@ -162,6 +199,10 @@ export function App() {
     setBusy(true);
     try {
       const res = await postConnection(op);
+      if (res.status === 401) {
+        expireSession();
+        return;
+      }
       const result = interpretConnectionPost(res.status, status.connection);
       if (res.status === 501) {
         setNotice(result.notice);
@@ -189,7 +230,12 @@ export function App() {
     ev.preventDefault();
     setError("");
     setNotice("");
-    const raw = blackKey.trim();
+    const form = ev.currentTarget as HTMLFormElement;
+    const field = form.querySelector(
+      'input[name="blackKey"]',
+    ) as HTMLInputElement | null;
+    const submitted = String(new FormData(form).get("blackKey") ?? "");
+    const raw = (field?.value || submitted || blackKey).trim();
     if (!raw) {
       setError("Вставьте BlackKey");
       return;
@@ -205,6 +251,10 @@ export function App() {
         },
       });
       setBlackKey(result.nextFieldValue);
+      if (result.status === 401) {
+        expireSession();
+        return;
+      }
       if (result.status === 201) {
         setKeyName("");
         setNotice("Ключ добавлен");
@@ -215,7 +265,12 @@ export function App() {
         setNotice("Импорт ключей ещё не готов");
         return;
       }
-      setError("Не удалось добавить ключ");
+      const mapped = importErrorMessage(result.status);
+      if (mapped === "session") {
+        expireSession();
+        return;
+      }
+      setError(mapped);
     } catch {
       setError("Нет связи с устройством");
     } finally {
@@ -242,198 +297,72 @@ export function App() {
 
   if (screen === "setup") {
     return (
-      <main class="shell">
-        <h1>BlackTemple KN</h1>
-        <p class="lead">Создайте пароль</p>
-        <form onSubmit={onSetup}>
-          <label>
-            Пароль
-            <input
-              type="password"
-              name="password"
-              autocomplete="new-password"
-              value={password}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Повторите пароль
-            <input
-              type="password"
-              name="repeat"
-              autocomplete="new-password"
-              value={repeat}
-              onInput={(e) => setRepeat(e.currentTarget.value)}
-            />
-          </label>
-          {error ? <p class="error">{error}</p> : null}
-          {notice ? <p class="notice">{notice}</p> : null}
-          <button type="submit" disabled={busy}>
-            Продолжить
-          </button>
-        </form>
-        <p class="aux">
-          <button
-            type="button"
-            class="linkbtn"
-            onClick={() => {
-              setError("");
-              setNotice("");
-              resetAuthFields();
-              setScreen("login");
-            }}
-          >
-            Войти
-          </button>
-        </p>
-      </main>
+      <SetupScreen
+        password={password}
+        repeat={repeat}
+        busy={busy}
+        error={error}
+        notice={notice}
+        onPassword={setPassword}
+        onRepeat={setRepeat}
+        onSubmit={onSetup}
+        onGoLogin={() => {
+          setError("");
+          setNotice("");
+          resetAuthFields();
+          setScreen("login");
+        }}
+      />
     );
   }
 
   if (screen === "login") {
     return (
-      <main class="shell">
-        <h1>BlackTemple KN</h1>
-        <p class="lead">Вход</p>
-        <form onSubmit={onLogin}>
-          <label>
-            Пароль
-            <input
-              type="password"
-              name="password"
-              autocomplete="current-password"
-              value={password}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-            />
-          </label>
-          {error ? <p class="error">{error}</p> : null}
-          {notice ? <p class="notice">{notice}</p> : null}
-          <button type="submit" disabled={busy}>
-            Войти
-          </button>
-        </form>
-        <p class="aux">
-          <button
-            type="button"
-            class="linkbtn"
-            onClick={() => {
-              setError("");
-              setNotice("");
-              resetAuthFields();
-              setScreen("setup");
-            }}
-          >
-            Первый запуск
-          </button>
-        </p>
-      </main>
+      <LoginScreen
+        password={password}
+        busy={busy}
+        error={error}
+        notice={notice}
+        onPassword={setPassword}
+        onSubmit={onLogin}
+        onGoSetup={() => {
+          setError("");
+          setNotice("");
+          resetAuthFields();
+          setScreen("setup");
+        }}
+      />
     );
   }
 
   if (screen === "advanced") {
-    const xray = status.xray;
-    const pid =
-      xray?.pid === null || xray?.pid === undefined ? "—" : String(xray.pid);
-    const restarts =
-      xray?.restartCount === undefined ? "—" : String(xray.restartCount);
     return (
-      <main class="shell">
-        <h1>BlackTemple KN</h1>
-        <p class="lead">Дополнительно</p>
-        <ul class="facts">
-          <li>
-            <span>Версия</span>
-            <span>{version?.version ?? "—"}</span>
-          </li>
-          <li>
-            <span>Xray</span>
-            <span>{xray?.state ?? "—"}</span>
-          </li>
-          <li>
-            <span>PID</span>
-            <span>{pid}</span>
-          </li>
-          <li>
-            <span>Перезапусков</span>
-            <span>{restarts}</span>
-          </li>
-        </ul>
-        {error ? <p class="error">{error}</p> : null}
-        <button
-          type="button"
-          class="secondary"
-          onClick={() => {
-            setError("");
-            setScreen("main");
-          }}
-        >
-          Назад
-        </button>
-      </main>
+      <AdvancedScreen
+        version={version}
+        status={status}
+        error={error}
+        onBack={() => {
+          setError("");
+          setScreen("main");
+        }}
+      />
     );
   }
 
   return (
-    <main class="shell">
-      <h1>BlackTemple KN</h1>
-      <p class="status">
-        <span class={connectionDotClass(connection)} />
-        {connectionLabel(connection)}
-      </p>
-      <ul class="facts">
-        <li>
-          <span>Ключ</span>
-          <span>{keyLabel(status.key)}</span>
-        </li>
-        <li>
-          <span>Сервер</span>
-          <span>{serverLabel(status.serverMode)}</span>
-        </li>
-        <li>
-          <span>Маршрутизация</span>
-          <span>{routingLabel(status.routing)}</span>
-        </li>
-      </ul>
-      {notice ? <p class="notice">{notice}</p> : null}
-      {error ? <p class="error">{error}</p> : null}
-      <button
-        type="button"
-        class="connect"
-        disabled={busy || connection === "connecting"}
-        onClick={onConnect}
-      >
-        {connection === "connected" ? "ОТКЛЮЧИТЬ" : "ПОДКЛЮЧИТЬ"}
-      </button>
-      <form class="keyform" onSubmit={onImportKey}>
-        <label>
-          BlackKey
-          <input
-            type="password"
-            name="blackKey"
-            autocomplete="off"
-            value={blackKey}
-            onInput={(e) => setBlackKey(e.currentTarget.value)}
-          />
-        </label>
-        <label>
-          Имя (необязательно)
-          <input
-            type="text"
-            name="keyName"
-            autocomplete="off"
-            value={keyName}
-            onInput={(e) => setKeyName(e.currentTarget.value)}
-          />
-        </label>
-        <button type="submit" class="secondary" disabled={busy}>
-          Добавить ключ
-        </button>
-      </form>
-      <p class="aux">
-        <button type="button" class="linkbtn" onClick={openAdvanced}>
-          Дополнительно
-        </button>
-      </p>
-    </main>
+    <MainScreen
+      connection={connection}
+      status={status}
+      busy={busy}
+      error={error}
+      notice={notice}
+      blackKey={blackKey}
+      keyName={keyName}
+      onBlackKey={setBlackKey}
+      onKeyName={setKeyName}
+      onConnect={onConnect}
+      onImportKey={onImportKey}
+      onOpenAdvanced={openAdvanced}
+    />
   );
 }

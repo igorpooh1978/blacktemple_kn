@@ -52,6 +52,7 @@ type ConnectionParams struct {
 	ShortID          string
 	SpiderX          string
 	HeaderType       string
+	AllowInsecure    bool
 }
 
 func (p ConnectionParams) String() string {

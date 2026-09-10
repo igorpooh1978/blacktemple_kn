@@ -11,15 +11,16 @@ type ConfigSecrets struct {
 // OutboundParams holds generator fields required for a working VLESS outbound
 // that are not in the frozen schema (SNI, REALITY publicKey, transport extras).
 type OutboundParams struct {
-	Flow        string
-	SNI         string
-	PublicKey   string
-	ShortID     string
-	Fingerprint string
-	SpiderX     string
-	Path        string
-	Host        string
-	ServiceName string
-	ALPN        []string
-	Mode        string // xhttp mode, e.g. auto
+	Flow          string
+	SNI           string
+	PublicKey     string
+	ShortID       string
+	Fingerprint   string
+	SpiderX       string
+	Path          string
+	Host          string
+	ServiceName   string
+	ALPN          []string
+	Mode          string // xhttp mode, e.g. auto
+	AllowInsecure bool
 }

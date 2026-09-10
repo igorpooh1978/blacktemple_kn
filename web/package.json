@@ -10,10 +10,12 @@
     "size": "node ./scripts/size-gate.mjs"
   },
   "dependencies": {
+    "@tabler/icons-preact": "^3.46.0",
     "preact": "^10.26.4"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.1",
+    "happy-dom": "^20.14.2",
     "typescript": "^5.8.2",
     "vite": "^5.4.14",
     "vitest": "^2.1.9"

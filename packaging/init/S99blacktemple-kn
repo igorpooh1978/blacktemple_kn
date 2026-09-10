@@ -7,7 +7,7 @@ ENABLED=yes
 PROCS=blacktempled
 # HTTP UI on LAN DHCP gateway (br0 RFC1918 via auto-lan). Not WAN, not all-interfaces.
 # -listen supplies the port; loopback host is only the no-bridge fallback.
-ARGS="-listen-mode auto-lan -listen 127.0.0.1:7480"
+ARGS="-listen-mode auto-lan -listen 127.0.0.1:7480 -data-dir /opt/blacktemple-kn/data"
 PREARGS=""
 DESC="blacktemple-kn"
 PREFIX=/opt/blacktemple-kn
@@ -16,7 +16,7 @@ PIDFILE=$PREFIX/run/blacktempled.pid
 LOGFILE=$PREFIX/logs/blacktempled.log
 PATH=$PREFIX/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-mkdir -p "$PREFIX/run" "$PREFIX/logs" 2>/dev/null || true
+mkdir -p "$PREFIX/run" "$PREFIX/logs" "$PREFIX/data" 2>/dev/null || true
 
 # Network-ready wait (condition loop with backoff, not a single delay).
 # Capture is not applied here: NDM hook + blacktempled netfilter-reconcile.

@@ -6,6 +6,10 @@ const (
 	EntwareRoot = "/opt"
 	PrefixDir   = "/opt/blacktemple-kn"
 
+	// DefaultDataDir is the packaged runtime store. Auth, profiles.json and
+	// run/xray.json live here. Capture config stays under PrefixDir/config.
+	DefaultDataDir = "/opt/blacktemple-kn/data"
+
 	// DefaultManagerPath is our daemon, not a foreign binary.
 	DefaultManagerPath = "/opt/blacktemple-kn/bin/blacktempled"
 	// DefaultXrayPath is our pinned binary. Never /opt/bin/xray (XKeen).
