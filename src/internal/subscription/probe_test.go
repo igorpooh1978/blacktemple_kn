@@ -88,9 +88,12 @@ func TestFetchRejectsNonHTTP(t *testing.T) {
 }
 
 func TestFetchedStringRedactsQuery(t *testing.T) {
-	f := Fetched{URL: "https://example.test/sub?token=" + fixtureUUID, ContentType: "text/plain", Body: []byte(fixtureVLESS())}
+	f := Fetched{origin: sanitizeURL("https://example.test/sub?token=" + fixtureUUID), ContentType: "text/plain", Body: []byte(fixtureVLESS())}
 	assertNoSecret(t, f.String())
 	if strings.Contains(f.String(), "token=") {
 		t.Fatal("query must be stripped")
+	}
+	if strings.Contains(f.String(), "/sub") {
+		t.Fatal("path must not appear in diagnostics")
 	}
 }

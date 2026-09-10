@@ -95,3 +95,11 @@ Feature: Profiles and BlackKey
     Given a durable good profiles.json
     When a later mutation cannot persist
     Then memory and disk keep the previous good state
+
+  @BTKN-PROF-017 @P0 @profiles
+  Scenario: Subscription URL path credentials never appear in diagnostics
+    Given a fixture URL https://USERINFO_SECRET_MARKER@provider.invalid/sub/PATH_SECRET_MARKER?token=QUERY_SECRET_MARKER#FRAGMENT_SECRET_MARKER
+    When Fetched Subscription Key ChangeKeyResponse and persist errors are printed or serialized
+    Then PATH_SECRET_MARKER QUERY_SECRET_MARKER FRAGMENT_SECRET_MARKER and USERINFO_SECRET_MARKER are absent
+    And percent-encoded path credentials are absent
+    And persisted profiles.json still retains the raw source for Refresh

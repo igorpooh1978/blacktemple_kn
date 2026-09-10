@@ -63,6 +63,8 @@ func (e *persistClassError) PublicMessage() string {
 	return e.public
 }
 
+func (e *persistClassError) GoString() string { return e.Error() }
+
 func persistFailed(err error) error {
 	return &persistClassError{class: classPersistFail, status: 500, public: publicPersist, cause: errors.Join(ErrPersistFailed, err)}
 }

@@ -16,17 +16,22 @@ var (
 	ErrBodyTooLarge   = errors.New("subscription body exceeds 1MiB")
 )
 
-// Fetched is a downloaded body. Body is not included in String().
+// Fetched is a downloaded body. The raw subscription URL is not stored:
+// diagnostics may show scheme+host+/[redacted] only. Body is omitted from String().
 type Fetched struct {
 	Body            []byte
 	ContentType     string
 	EncodingHint    string
 	UserInfoPresent bool
-	URL             string
+	origin          string
 }
 
 func (f Fetched) String() string {
-	return "Fetched{URL:" + sanitizeURL(f.URL) +
+	origin := f.origin
+	if origin == "" {
+		origin = "[redacted]"
+	}
+	return "Fetched{URL:" + origin +
 		" ContentType:" + f.ContentType +
 		" Bytes:" + itoa(len(f.Body)) +
 		" UserInfo:" + yesNo(f.UserInfoPresent) + "}"
@@ -77,7 +82,7 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string) (Fetched, er
 		Body:            body,
 		ContentType:     ct,
 		UserInfoPresent: resp.Header.Get("subscription-userinfo") != "",
-		URL:             u,
+		origin:          sanitizeURL(u),
 	}, nil
 }
 

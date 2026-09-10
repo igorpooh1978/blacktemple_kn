@@ -24,13 +24,16 @@ func sanitizeURL(raw string) string {
 	if err != nil || u.Scheme == "" {
 		return "[invalid-url]"
 	}
-	u.User = nil
-	u.RawQuery = ""
-	u.Fragment = ""
+	// Never include User, Path, RawPath, Opaque, RawQuery, or Fragment.
+	// Any path segment may be a BlackKey credential.
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return u.Scheme + "://[redacted-host]"
+		return u.Scheme + "://[redacted-host]/[redacted]"
 	}
-	return u.Scheme + "://" + u.Host + u.Path
+	host := u.Host
+	if host == "" {
+		return u.Scheme + "://[redacted-host]/[redacted]"
+	}
+	return u.Scheme + "://" + host + "/[redacted]"
 }
 
 func containsSecret(haystack string, secrets ...string) bool {

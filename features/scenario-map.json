@@ -810,6 +810,14 @@
       "tests": ["src/internal/profiles/persist_test.go::TestPersistFailureLeavesGoodState"],
       "redProof": "RED: TestPersistFailureLeavesGoodState FAIL until persist-then-publish"
     },
+    "BTKN-PROF-017": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/subscription/redact_test.go::TestFetchedPathSecretsNeverAppearInDiagnostics",
+        "src/internal/profiles/persist_test.go::TestRefreshAfterRestartKeepsPathSource"
+      ],
+      "redProof": "RED: TestFetchedPathSecretsNeverAppearInDiagnostics FAIL on 6bc96fc because sanitizeURL keeps Path"
+    },
     "BTKN-CONN-007": {
       "priority": "P0",
       "tests": ["src/internal/connection/socks_only_test.go::TestSOCKSOnlyConnectOmitsTransparentInbounds"],

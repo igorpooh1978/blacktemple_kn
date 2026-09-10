@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -410,5 +411,79 @@ func TestParseClassifiesReplacement(t *testing.T) {
 	}
 	if !strings.EqualFold(parsed.Entries[0].Protocol, "vless") {
 		t.Fatalf("protocol %s", parsed.Entries[0].Protocol)
+	}
+}
+
+const (
+	persistPathMarker     = "PATH_SECRET_MARKER"
+	persistQueryMarker    = "QUERY_SECRET_MARKER"
+	persistFragmentMarker = "FRAGMENT_SECRET_MARKER"
+)
+
+func TestRefreshAfterRestartKeepsPathSource(t *testing.T) {
+	var hits int
+	var lastPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		lastPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(persistVLESS()))
+	}))
+	defer srv.Close()
+	raw := srv.URL + "/sub/" + persistPathMarker + "?token=" + persistQueryMarker + "#" + persistFragmentMarker
+	dir := t.TempDir()
+	svc := New(Config{Client: srv.Client(), DataDir: dir})
+	p, err := svc.Import(context.Background(), ImportRequest{BlackKey: raw, Name: "path"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastPath != "/sub/"+persistPathMarker {
+		t.Fatalf("import path %s", lastPath)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(dir, "profiles.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), persistPathMarker) {
+		t.Fatal("profiles.json must retain raw source for Refresh")
+	}
+	assertNoSecret(t, p.String())
+	for _, s := range []string{
+		fmt.Sprint(p),
+		fmt.Sprintf("%#v", p),
+		fmt.Sprintf("%#v", ImportRequest{BlackKey: raw, Name: "path"}),
+		svc.List()[0].String(),
+	} {
+		if strings.Contains(s, persistPathMarker) || strings.Contains(s, persistQueryMarker) || strings.Contains(s, persistFragmentMarker) {
+			t.Fatalf("leaked subscription source: %s", s)
+		}
+	}
+
+	svc2 := New(Config{Client: srv.Client(), DataDir: dir})
+	if err := svc2.Refresh(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 2 {
+		t.Fatalf("refresh fetches=%d", hits)
+	}
+	if lastPath != "/sub/"+persistPathMarker {
+		t.Fatalf("refresh path %s", lastPath)
+	}
+
+	k := keys.New("id", "p", "s", "srv", "vless", "lab", persistPathMarker)
+	resp := keys.NewChangeKeyResponse("vless://" + persistPathMarker + "@127.0.0.1:443")
+	for _, v := range []any{k, resp} {
+		for _, s := range []string{fmt.Sprint(v), fmt.Sprintf("%v", v), fmt.Sprintf("%+v", v), fmt.Sprintf("%#v", v)} {
+			if strings.Contains(s, persistPathMarker) {
+				t.Fatalf("leaked: %s", s)
+			}
+		}
+	}
+	kb, err := json.Marshal(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(kb), persistPathMarker) {
+		t.Fatal("key JSON leaked material")
 	}
 }

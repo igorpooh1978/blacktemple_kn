@@ -75,6 +75,8 @@ func (e *ClassifiedError) PublicMessage() string {
 	return e.Public
 }
 
+func (e *ClassifiedError) GoString() string { return e.Error() }
+
 func ClassifyParse(err error) error {
 	if err == nil {
 		return nil
