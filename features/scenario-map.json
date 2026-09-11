@@ -1004,6 +1004,59 @@
       "priority": "P0",
       "tests": ["src/internal/xray/resolved_ws_test.go::TestResolvedVLESSWSTLSSocksOnly"],
       "redProof": "RED: TestResolvedVLESSWSTLSSocksOnly FAIL if generate emits Reality or non-SOCKS inbounds"
+    },
+    "BTKN-R8-001": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/profiles/resolver_test.go::TestFreshBlackKeyResolutionReturnsRunnableCandidates",
+        "src/internal/profiles/signed_sub_test.go::TestHTTPResolverImportUsesSignedFixture"
+      ],
+      "redProof": "RED: TestFreshBlackKeyResolutionReturnsRunnableCandidates FAIL until Import invokes BlackKeyResolver"
+    },
+    "BTKN-R8-002": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestRawBootstrapNeverBecomesRunnableAfterResolve"],
+      "redProof": "RED: TestRawBootstrapNeverBecomesRunnableAfterResolve FAIL if bootstrap Reality pbk=5 is published"
+    },
+    "BTKN-R8-003": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolvedVLESSWSTLSNormalizes"],
+      "redProof": "RED: TestResolvedVLESSWSTLSNormalizes FAIL if WS TLS UUID shape is lost"
+    },
+    "BTKN-R8-004": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolverFailurePreservesOldResolvedSet"],
+      "redProof": "RED: TestResolverFailurePreservesOldResolvedSet FAIL until Resolve returns error without replacing keys"
+    },
+    "BTKN-R8-005": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolverFailurePreservesLKG"],
+      "redProof": "RED: TestResolverFailurePreservesLKG FAIL until Resolve failure keeps LKG"
+    },
+    "BTKN-R8-006": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolverResultPersistsAtomically"],
+      "redProof": "RED: TestResolverResultPersistsAtomically FAIL until persist failure keeps disk and memory"
+    },
+    "BTKN-R8-007": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestRestartRestoresAutomaticResolvedWithoutProvider"],
+      "redProof": "RED: TestRestartRestoresAutomaticResolvedWithoutProvider FAIL until Import auto-resolves and persists"
+    },
+    "BTKN-R8-008": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/resolved_test.go::TestAutomaticResolvedConnectsThroughSOCKS"],
+      "redProof": "RED: TestAutomaticResolvedConnectsThroughSOCKS FAIL until Import auto-resolve then SOCKS connect"
+    },
+    "BTKN-R8-009": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolverSecretsAbsentFromDiagnostics"],
+      "redProof": "RED_PROOF_NOT_AVAILABLE: leaking secrets would be an unsafe RED mutation"
+    },
+    "BTKN-R8-010": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/resolver_test.go::TestResolverSourcesNeverTouchNetfilter"],
+      "redProof": "RED: TestResolverSourcesNeverTouchNetfilter FAIL if resolver sources call netfilter or XKeen"
     }
   }
 }

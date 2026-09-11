@@ -257,7 +257,7 @@ export function App() {
       }
       if (result.status === 201) {
         setKeyName("");
-        setNotice("Ключ добавлен");
+        setNotice("Готово");
         await loadStatus();
         return;
       }

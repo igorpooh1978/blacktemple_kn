@@ -48,7 +48,10 @@ export function MainScreen(props: {
   const keyReady = props.status.key === "active";
 
   useEffect(() => {
-    if (props.notice === "Ключ добавлен" && keyForm.current) {
+    if (
+      (props.notice === "Готово" || props.notice.startsWith("Получено ")) &&
+      keyForm.current
+    ) {
       keyForm.current.open = false;
     }
   }, [props.notice]);
@@ -149,7 +152,7 @@ export function MainScreen(props: {
               loading={props.busy}
               icon={<IconKey size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
             >
-              Добавить ключ
+              {props.busy ? "Получение серверов..." : "Добавить ключ"}
             </Button>
           </form>
         </details>

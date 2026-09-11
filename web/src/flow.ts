@@ -17,6 +17,13 @@ export function screenFromAuthState(state: AuthState): Screen {
 
 export const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Войдите снова.";
 
+export function importSuccessNotice(serverCount: number): string {
+  if (serverCount > 0) {
+    return "Получено " + String(serverCount) + " серверов";
+  }
+  return "Готово";
+}
+
 export function importErrorMessage(httpStatus: number): string | "session" {
   switch (httpStatus) {
     case 401:
@@ -26,7 +33,7 @@ export function importErrorMessage(httpStatus: number): string | "session" {
     case 413:
       return "Подписка слишком большая.";
     case 502:
-      return "Не удалось загрузить подписку.";
+      return "Не удалось обновить список серверов. Сохранённый рабочий сервер оставлен без изменений.";
     case 504:
       return "Сервер подписки не ответил вовремя.";
     default:

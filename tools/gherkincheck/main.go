@@ -30,7 +30,7 @@ type parsedScenario struct {
 	Line     int
 }
 
-var idTag = regexp.MustCompile(`@BTKN-[A-Z]+-[0-9]{3}`)
+var idTag = regexp.MustCompile(`@BTKN-[A-Z0-9]+-[0-9]{3}`)
 
 func main() {
 	root := "."

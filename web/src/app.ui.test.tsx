@@ -246,7 +246,7 @@ describe("BlackKey import", () => {
     expect(keyInput.value).toBe(SECRET);
     const form = root.querySelector("form.key-form") as HTMLFormElement;
     form.requestSubmit();
-    await see("Ключ добавлен");
+    await see("Готово");
     expect(root.innerHTML).not.toContain(SECRET);
     const later = root.querySelector(
       'input[name="blackKey"]',
