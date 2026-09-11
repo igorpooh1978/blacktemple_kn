@@ -1,0 +1,18 @@
+title = "blacktemple_kn"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "config and tests that mention the forbidden identifier without material"
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)hmac_absent_test\.go$''',
+  '''(^|/)scenario-map\.json$''',
+]
+
+[[rules]]
+id = "blackkey-hmac-const"
+description = "BlackKey HMAC signing key must not be a tracked Go string literal"
+regex = '''const\s+blackKeyHMACKey\s*='''
+tags = ["credential", "hmac"]

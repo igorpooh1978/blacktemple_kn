@@ -24,3 +24,10 @@ Feature: Auth session routing
     Then transient BlackKey and password fields are cleared
     And the UI switches to LOGIN
     And the message is Сессия истекла. Войдите снова.
+
+  @BTKN-AUTH-004 @P0 @auth
+  Scenario: Authenticated password change accepts the new password
+    Given a configured password and a valid session
+    When POST /api/v1/auth/password succeeds with current and new
+    Then login with the old password fails
+    And login with the new password succeeds

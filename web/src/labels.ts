@@ -90,7 +90,7 @@ export function routingLabel(v: RoutingMode): string {
 export function noticeAlertTone(
   notice: string,
 ): "info" | "warning" | "success" {
-  if (notice === "Ключ добавлен") {
+  if (notice === "Готово" || notice.startsWith("Получено ") || notice === "Пароль панели изменён.") {
     return "success";
   }
   if (

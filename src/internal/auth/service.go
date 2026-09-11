@@ -47,6 +47,13 @@ func (s *Service) Setup(password string) error {
 	return s.passwords.setup(password)
 }
 
+func (s *Service) ChangePassword(current, next string) error {
+	if s == nil || s.passwords == nil {
+		return ErrNotInitialized
+	}
+	return s.passwords.change(current, next)
+}
+
 func (s *Service) Login(password string) (sessionID string, expires time.Time, err error) {
 	if err := s.passwords.verify(password); err != nil {
 		if errors.Is(err, ErrNotInitialized) {

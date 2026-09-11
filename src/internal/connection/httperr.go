@@ -84,6 +84,12 @@ func codeImport(err error) error {
 		return &codedError{status: http.StatusBadRequest, msg: "Ключ или подписка имеют неизвестный формат.", cause: err}
 	case errors.Is(err, subscription.ErrBodyTooLarge):
 		return &codedError{status: http.StatusRequestEntityTooLarge, msg: "Подписка слишком большая.", cause: err}
+	case errors.Is(err, profiles.ErrResolverNotConfigured):
+		return &codedError{status: http.StatusServiceUnavailable, msg: "Резолвер ключа не настроен.", cause: err}
+	case errors.Is(err, profiles.ErrResolverUnavailable),
+		errors.Is(err, profiles.ErrResolverInvalidResponse),
+		errors.Is(err, profiles.ErrResolverRejected):
+		return &codedError{status: http.StatusBadGateway, msg: "Не удалось обновить список серверов. Сохранённый рабочий сервер оставлен без изменений.", cause: err}
 	default:
 		return &codedError{status: http.StatusInternalServerError, msg: "import failed", cause: err}
 	}

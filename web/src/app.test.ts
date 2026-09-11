@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { App } from "./app";
 import {
   importErrorMessage,
+  importSuccessNotice,
   screenAfterSetupStatus,
   screenFromAuthState,
   SESSION_EXPIRED_MESSAGE,
@@ -48,6 +49,7 @@ describe("first-run flow", () => {
     expect(importErrorMessage(400)).toBe(
       "Ключ или подписка имеют неизвестный формат.",
     );
+    expect(importErrorMessage(503)).toBe("Резолвер ключа не настроен.");
   });
 });
 
@@ -67,8 +69,12 @@ describe("Russian labels", () => {
   });
 
   it("maps notices to alert tones without exposing secrets", () => {
-    expect(noticeAlertTone("Ключ добавлен")).toBe("success");
+    expect(noticeAlertTone("Готово")).toBe("success");
+    expect(noticeAlertTone(importSuccessNotice(4))).toBe("success");
+    expect(importSuccessNotice(4)).toBe("Получено 4 серверов");
+    expect(importSuccessNotice(0)).toBe("Готово");
     expect(noticeAlertTone("VPN engine ещё не готов")).toBe("warning");
     expect(noticeAlertTone("Пароль уже задан. Войдите.")).toBe("info");
+    expect(noticeAlertTone("Пароль панели изменён.")).toBe("success");
   });
 });

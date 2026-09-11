@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/profiles"
+	"github.com/igorpooh1978/blacktemple_kn/src/internal/subscription"
 )
 
 const resolvedTLSUUID = "11111111-1111-4111-8111-111111111111"
@@ -137,6 +139,63 @@ func TestRestartRestoresResolvedWithoutProvider(t *testing.T) {
 	}
 	if hits != beforeHits {
 		t.Fatalf("provider refetch hits=%d before=%d", hits, beforeHits)
+	}
+}
+
+type r8FakeResolver struct {
+	entries []subscription.ParsedShare
+	hits    int
+}
+
+func (f *r8FakeResolver) Resolve(_ context.Context, source profiles.Source) ([]subscription.ParsedShare, error) {
+	f.hits++
+	_ = source
+	return f.entries, nil
+}
+
+func TestAutomaticResolvedConnectsThroughSOCKS(t *testing.T) {
+	body := bootstrapURLBody()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	parsed, err := subscription.Parse([]byte(wsTLSShare("example.com", "DE-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := &r8FakeResolver{entries: parsed.Entries}
+	eng := &fakeEngine{}
+	s := New(Config{
+		Profiles:    profiles.New(profiles.Config{Client: srv.Client(), Resolver: res}),
+		Engine:      eng,
+		DataDir:     t.TempDir(),
+		ListenPort:  11080,
+		FastBackoff: true,
+		Probe:       nopProbe{},
+	})
+	if _, err := s.Profiles().Import(context.Background(), profiles.ImportRequest{BlackKey: srv.URL + "/sub", Name: "bk"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Control(context.Background(), "connect"); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	if st.Connection != "connected" {
+		t.Fatalf("connection=%s class=%s", st.Connection, st.ErrorClass)
+	}
+	raw, err := os.ReadFile(s.ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"port":11080`) {
+		t.Fatal("SOCKS 11080 missing")
+	}
+	for _, bad := range []string{"11820", "redirect-in", "tproxy-in"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("contains %s", bad)
+		}
 	}
 }
 

@@ -47,6 +47,7 @@ function stubApi(opts: {
   statusBody?: StatusBody;
   setupStatus?: number;
   loginStatus?: number;
+  passwordStatus?: number;
   connectionStatus?: number;
   profileStatus?: number;
   version?: {
@@ -86,6 +87,9 @@ function stubApi(opts: {
     }
     if (url.includes("/api/v1/auth/login") && method === "POST") {
       return jsonRes(opts.loginStatus ?? 200);
+    }
+    if (url.includes("/api/v1/auth/password") && method === "POST") {
+      return jsonRes(opts.passwordStatus ?? 204);
     }
     if (url.includes("/api/v1/connection") && method === "POST") {
       return jsonRes(opts.connectionStatus ?? 202);
@@ -246,7 +250,7 @@ describe("BlackKey import", () => {
     expect(keyInput.value).toBe(SECRET);
     const form = root.querySelector("form.key-form") as HTMLFormElement;
     form.requestSubmit();
-    await see("Ключ добавлен");
+    await see("Готово");
     expect(root.innerHTML).not.toContain(SECRET);
     const later = root.querySelector(
       'input[name="blackKey"]',
@@ -303,6 +307,8 @@ describe("setup and login", () => {
     typeInto("password", "wrong-pass");
     findButton("Войти").click();
     await see("Неверный пароль");
+    expect(root.textContent).not.toContain("Первый запуск");
+    expect(root.textContent).not.toContain("Первичная настройка");
   });
 });
 
@@ -328,6 +334,12 @@ describe("advanced screen", () => {
     await see("0.1.0-dev");
     await see("RUNNING");
     await see("4242");
+    await see("Пароль панели");
+    typeInto("currentPassword", "old-pass-1");
+    typeInto("newPassword", "new-pass-88");
+    typeInto("newRepeat", "new-pass-88");
+    findButton("Сменить пароль").click();
+    await see("Пароль панели изменён.");
     findButton("Назад").click();
     await see("VPN отключён");
     expect(root.textContent).toContain("Подключить");

@@ -5,6 +5,7 @@ import {
   parseStatus,
   postConnection,
   postLogin,
+  postChangePassword,
   postProfile,
   postSetup,
 } from "./api";
@@ -39,6 +40,21 @@ describe("API client", () => {
     expect(url).toBe("/api/v1/auth/setup");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(String(init.body))).toEqual({ password: "abcdefgh" });
+  });
+
+  it("posts change password with current and new", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postChangePassword("old-pass-1", "new-pass-88");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/password");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(String(init.body))).toEqual({
+      current: "old-pass-1",
+      new: "new-pass-88",
+    });
   });
 
   it("posts connect op without claiming a session header beyond cookies", async () => {

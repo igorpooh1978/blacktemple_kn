@@ -46,6 +46,26 @@ func TestSetupLoginLogoutAndPlaintextAbsent(t *testing.T) {
 	}
 }
 
+func TestChangePassword(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := New(Config{DataDir: dir, Iterations: minIterations, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Setup("old-pass-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ChangePassword("old-pass-1", "new-pass-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Login("old-pass-1"); err != ErrInvalidPassword {
+		t.Fatalf("old password: %v", err)
+	}
+	if _, _, err := svc.Login("new-pass-2"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionExpiry(t *testing.T) {
 	dir := t.TempDir()
 	svc, err := New(Config{DataDir: dir, Iterations: minIterations, SessionTTL: 40 * time.Millisecond})

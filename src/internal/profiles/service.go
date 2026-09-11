@@ -39,10 +39,11 @@ func (r ImportRequest) GoString() string { return r.String() }
 
 // Config wires a profile service. Empty DataDir keeps an in-memory store.
 type Config struct {
-	Client  *http.Client
-	Changer keys.KeyChanger
-	DataDir string
-	Writer  *atomicfile.Writer
+	Client   *http.Client
+	Changer  keys.KeyChanger
+	Resolver BlackKeyResolver
+	DataDir  string
+	Writer   *atomicfile.Writer
 }
 
 type record struct {
@@ -57,6 +58,7 @@ type Service struct {
 	mu             sync.Mutex
 	client         *http.Client
 	changer        keys.KeyChanger
+	resolver       BlackKeyResolver
 	catalog        *countries.Catalog
 	byID           map[string]*record
 	order          []string
@@ -79,6 +81,7 @@ func New(cfg Config) *Service {
 	s := &Service{
 		client:    cfg.Client,
 		changer:   cfg.Changer,
+		resolver:  cfg.Resolver,
 		catalog:   countries.NewCatalog(),
 		byID:      map[string]*record{},
 		now:       func() time.Time { return time.Now().UTC() },
@@ -206,6 +209,22 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (Profile, error
 	if err != nil {
 		return Profile{}, err
 	}
+	published := filterPublishable(parsed.Entries)
+	if s.resolver != nil {
+		got, rerr := s.resolver.Resolve(ctx, NewSource(subMeta.kind, subMeta.source))
+		if rerr != nil {
+			if len(published) == 0 {
+				return Profile{}, wrapResolverError(rerr)
+			}
+		} else {
+			next := resolverCandidates(got)
+			if len(next) > 0 {
+				published = next
+			} else if len(published) == 0 {
+				return Profile{}, resolverInvalid(nil)
+			}
+		}
+	}
 	var p Profile
 	err = s.commit(func(m *memory) error {
 		id := newID()
@@ -224,7 +243,6 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (Profile, error
 			FetchedAt:   s.now(),
 		}
 		sub = withSource(sub, subMeta.source)
-		published := filterPublishable(parsed.Entries)
 		ks, srvs := s.entities(id, subID, published)
 		st := keys.NewState(id, ks)
 		if len(ks) > 0 {
@@ -514,6 +532,13 @@ type loadedMeta struct {
 func (s *Service) load(ctx context.Context, raw string) (subscription.Result, loadedMeta, error) {
 	low := strings.ToLower(strings.TrimSpace(raw))
 	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		if s.resolver != nil {
+			return subscription.Result{}, loadedMeta{
+				kind:      "url",
+				source:    raw,
+				sanitized: sanitizeForID(raw),
+			}, nil
+		}
 		fetched, err := subscription.Fetch(ctx, s.client, raw)
 		if err != nil {
 			return subscription.Result{}, loadedMeta{}, err

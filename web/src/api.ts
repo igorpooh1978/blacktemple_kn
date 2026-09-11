@@ -239,6 +239,16 @@ export function postLogin(password: string): Promise<Response> {
   });
 }
 
+export function postChangePassword(
+  current: string,
+  next: string,
+): Promise<Response> {
+  return apiFetch("/api/v1/auth/password", {
+    method: "POST",
+    body: JSON.stringify({ current, new: next }),
+  });
+}
+
 export function postConnection(op: ConnectionOp): Promise<Response> {
   return apiFetch("/api/v1/connection", {
     method: "POST",
