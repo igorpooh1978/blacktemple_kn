@@ -168,8 +168,8 @@
     },
     "BTKN-ROUT-012": {
       "priority": "P0",
-      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenCollision"],
-      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL until live XKeen is coexistence not a blocking collision"
     },
     "BTKN-ROUT-013": {
       "priority": "P0",
@@ -1087,6 +1087,53 @@
       "priority": "P0",
       "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestMissingHMACPreservesLKG"],
       "redProof": "RED: TestMissingHMACPreservesLKG FAIL until missing secret is fail-closed without wiping LKG"
+    },
+    "BTKN-R6I-LIVE-001": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestPREROUTINGInsertedAtHead",
+        "src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"
+      ],
+      "redProof": "RED: TestPREROUTINGInsertedAtHead FAIL until BTKN jump is iptables -I PREROUTING 1"
+    },
+    "BTKN-R6I-LIVE-002": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestSelectedClientOnly"],
+      "redProof": "RED: TestSelectedClientOnly FAIL until non-selected sources RETURN from BTKN_PRE"
+    },
+    "BTKN-R6I-LIVE-003": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXrayOutboundNotRecaptured"],
+      "redProof": "RED: TestXrayOutboundNotRecaptured FAIL if OUTPUT or BTKN_OUT is attached"
+    },
+    "BTKN-R6I-LIVE-004": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL if Apply deletes xkeen/0x111/1181"
+    },
+    "BTKN-R6I-LIVE-005": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestDisabledRemoveOwnedNeverTouchesXKeen"],
+      "redProof": "RED: TestDisabledRemoveOwnedNeverTouchesXKeen FAIL until Remove is BTKN-only"
+    },
+    "BTKN-R6I-LIVE-006": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestPartialApplyRollback"],
+      "redProof": "RED: TestPartialApplyRollback FAIL until partial Apply calls Remove"
+    },
+    "BTKN-R6I-LIVE-007": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestDisabledRemoveOwnedNeverTouchesXKeen",
+        "src/internal/xray/transparent_test.go::TestStartTransparentRejectsXKeenPort",
+        "src/internal/platform/ourxray_test.go::TestForeignXrayIsNeverOurs"
+      ],
+      "redProof": "RED: OUR Xray stop/start must refuse port 1181 and never name /opt/sbin/xray as ours"
+    },
+    "BTKN-R6I-LIVE-008": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestSetCaptureEnabledRoundTrip"],
+      "redProof": "RED: TestSetCaptureEnabledRoundTrip FAIL until capture.enabled can be persisted false after true"
     }
   }
 }

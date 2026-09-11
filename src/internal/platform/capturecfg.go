@@ -84,6 +84,27 @@ func EnsureCaptureConfig(path string) error {
 	return atomicfile.WriteFile(path, raw, 0o600)
 }
 
+// SetCaptureEnabled persists the master switch. Missing files are created
+// with engine transparent-iptables. Other capture fields keep defaults.
+func SetCaptureEnabled(path string, enabled bool) error {
+	if path == "" {
+		path = CaptureConfigPath("")
+	}
+	cfg := defaultCaptureConfig()
+	if _, err := os.Stat(path); err == nil {
+		loaded := loadCaptureSettings(path)
+		cfg.Capture = loaded
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	cfg.Capture.Enabled = enabled
+	raw, err := marshalCaptureConfig(cfg)
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(path, raw, 0o600)
+}
+
 // LoadCaptureEnabled returns true only when the JSON boolean capture.enabled
 // is exactly true. Missing files, missing fields, and corrupt values are false.
 // Environment variables are ignored.

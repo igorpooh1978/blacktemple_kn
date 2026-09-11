@@ -122,7 +122,7 @@ func TestTCPRedirectPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
 		t.Fatal("TCP REDIRECT to 11820 missing")
 	}
-	if !planHasSeq(p.Install, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !planHasSeq(p.Install, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("nat PREROUTING jump missing")
 	}
 	if planHasSeq(p.Install, "-t", "mangle", "-j", "REDIRECT") {
@@ -151,7 +151,7 @@ func TestUDPTProxyPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-4", "route", "add", "local", "default", "dev", "lo", "table", "4254") {
 		t.Fatal("table 4254 local lo missing")
 	}
-	if !planHasSeq(p.Install, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !planHasSeq(p.Install, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("mangle PREROUTING jump missing")
 	}
 	if err := assertUDPOrder(p.Install); err != nil {
@@ -218,12 +218,33 @@ func TestPortCollision(t *testing.T) {
 	}
 }
 
-func TestXKeenCollision(t *testing.T) {
+func TestPREROUTINGInsertedAtHead(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump must insert at PREROUTING head")
+	}
+	if !planHasSeq(p.Install, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("mangle BTKN jump must insert at PREROUTING head")
+	}
+	if planHasSeq(p.Install, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump must not append after foreign PREROUTING")
+	}
+	if planHasSeq(p.Install, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+		t.Fatal("mangle BTKN jump must not append after foreign PREROUTING")
+	}
+}
+
+func TestXKeenLiveAllowsApplyWithoutMutatingXKeen(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -m comment --comment xkeen_rule -p tcp -j REDIRECT --to-ports 1181"
 	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -m socket --transparent -j RETURN\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
 	fx.pidofOut = "25942"
 	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
 	eng := newTestEngine(t, fx)
 
 	if _, err := eng.Plan(); err != nil {
@@ -236,11 +257,40 @@ func TestXKeenCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight must work with XKeen: %v", err)
 	}
-	if !rep.XKeenActive || !hasKind(rep, CollisionXKeen) {
-		t.Fatalf("xkeen not reported: %+v", rep)
+	if rep.XKeenState != XKeenLive {
+		t.Fatalf("state=%s want XKEEN_LIVE", rep.XKeenState)
 	}
-	if err := eng.Apply(context.Background()); !errors.Is(err, ErrExistingCaptureEngine) {
+	if !rep.XKeenActive {
+		t.Fatal("live XKeen must be reported active")
+	}
+	if hasKind(rep, CollisionXKeen) {
+		t.Fatal("live XKeen must not be a blocking collision")
+	}
+	if !rep.OK {
+		t.Fatalf("live XKeen must allow Apply: %+v", rep)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("Apply must insert nat BTKN jump first")
+	}
+	for _, c := range after {
+		if isProbe(c.Name, c.Args) {
+			continue
+		}
+		line := argvLine(c)
+		if hasTokenArgs(c, "xkeen") {
+			t.Fatalf("must not mutate XKeen: %s", line)
+		}
+		if hasTokenArgs(c, "0x111") || hasTokenArgs(c, "1181") {
+			t.Fatalf("must not touch XKeen mark/port: %s", line)
+		}
+		args := strings.Join(c.Args, " ")
+		if strings.Contains(args, "lookup 111") || strings.Contains(args, "table 111") {
+			t.Fatalf("must not touch table 111: %s", line)
+		}
 	}
 }
 
@@ -296,7 +346,7 @@ func TestDisabledRemoveOwnedNeverTouchesXKeen(t *testing.T) {
 		if strings.Contains(args, "lookup 111") || strings.Contains(args, "table 111") {
 			t.Fatalf("RemoveOwned must not touch table 111: %s", line)
 		}
-		if c.Name == "iptables" && hasTokenArgs(c, "-A") && hasTokenArgs(c, "BTKN_PRE") && hasTokenArgs(c, "PREROUTING") {
+		if c.Name == "iptables" && (hasTokenArgs(c, "-A") || hasTokenArgs(c, "-I")) && hasTokenArgs(c, "BTKN_PRE") && hasTokenArgs(c, "PREROUTING") {
 			t.Fatalf("disabled Reconcile must not Apply BTKN jump: %s", line)
 		}
 	}
@@ -309,10 +359,10 @@ func TestApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := fx.snapshot()
-	if !callsHaveSeq(calls, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !callsHaveSeq(calls, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("Apply did not attach nat hook")
 	}
-	if !callsHaveSeq(calls, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !callsHaveSeq(calls, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("Apply did not attach mangle hook")
 	}
 	if !eng.applied {
@@ -926,7 +976,7 @@ func checkForeignChain(c Argv) error {
 	if strings.HasPrefix(chain, "BTKN_") {
 		return nil
 	}
-	if chain == "PREROUTING" && (mut == "-A" || mut == "-D" || mut == "--append" || mut == "--delete") {
+	if chain == "PREROUTING" && (mut == "-A" || mut == "-I" || mut == "-D" || mut == "--append" || mut == "--insert" || mut == "--delete") {
 		if hasSeq(c.Args, "-j", ChainPRE) {
 			return nil
 		}

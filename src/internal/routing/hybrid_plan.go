@@ -85,10 +85,13 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 		ipcmd("-4", "route", "add", "local", "default", "dev", "lo", "table", table),
 	)
 
-	// Attach last so a partial Apply before this point does not capture.
+	// Insert at PREROUTING head so the selected client is classified before
+	// foreign jumps (including live XKeen). Non-selected sources RETURN
+	// immediately and continue to later chains. Attach last so a partial
+	// Apply before this point does not capture.
 	cmds = append(cmds,
-		iptables("-t", "nat", "-A", "PREROUTING", "-j", ChainPRE),
-		iptables("-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE),
+		iptables("-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE),
+		iptables("-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE),
 	)
 	return cmds
 }

@@ -138,3 +138,33 @@ func TestJSONBoolTrueOnlyExactTrue(t *testing.T) {
 		t.Fatal("JSON boolean true must enable")
 	}
 }
+
+func TestSetCaptureEnabledRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := SetCaptureEnabled(p, true); err != nil {
+		t.Fatal(err)
+	}
+	if !LoadCaptureEnabled(p) {
+		t.Fatal("enabled true must persist")
+	}
+	if err := SetCaptureEnabled(p, false); err != nil {
+		t.Fatal(err)
+	}
+	if LoadCaptureEnabled(p) {
+		t.Fatal("post-acceptance state must persist capture.enabled=false")
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg DaemonCaptureConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Capture.Enabled {
+		t.Fatal("file still enabled")
+	}
+	if cfg.Capture.Engine != CaptureEngineTransparentIptables {
+		t.Fatalf("engine %q", cfg.Capture.Engine)
+	}
+}

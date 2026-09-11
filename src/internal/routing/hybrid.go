@@ -87,9 +87,10 @@ func (e *HybridIptablesEngine) DryRun() (CapturePlan, error) {
 	return e.Plan()
 }
 
-// Apply installs BTKN hooks. Empty client, collisions, and an active XKeen
-// capture fail. Idempotent if this instance already applied. Partial failure
-// rolls back via Remove.
+// Apply installs BTKN hooks. Empty client and BTKN-namespace collisions fail.
+// Live XKeen (1181 / mark 0x111 / table 111) is coexistence and does not block.
+// Residual XKeen capture returns ErrExistingCaptureEngine. Idempotent if this
+// instance already applied. Partial failure rolls back via Remove.
 func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	if err := e.validateClient(); err != nil {
 		return err
@@ -111,7 +112,7 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if report.XKeenActive {
+	if report.XKeenState == XKeenResidual {
 		return ErrExistingCaptureEngine
 	}
 	if !report.OK {

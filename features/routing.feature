@@ -73,10 +73,12 @@ Feature: Routing capture
     Then nat PREROUTING REDIRECT targets 11820
 
   @BTKN-ROUT-012 @P0 @routing
-  Scenario: XKeen detected allows Plan and refuses Apply
-    Given XKeen coexistence evidence
+  Scenario: Live XKeen coexistence allows Plan and Apply without mutating XKeen
+    Given XKeen live coexistence evidence
     When Plan and Apply run
-    Then Plan succeeds and Apply is rejected
+    Then Plan succeeds
+    And Apply installs only BTKN objects
+    And XKeen mark table ports and jumps are not modified
 
   @BTKN-ROUT-013 @P0 @routing
   Scenario: Mark and table collisions fail preflight
@@ -105,8 +107,8 @@ Feature: Routing capture
     Then both errors are reported
 
   @BTKN-ROUT-018 @P0 @routing
-  Scenario: Manager desired-present Apply refuses while XKeen is active
-    Given XKeen capture still installed
+  Scenario: Manager desired-present Apply refuses residual XKeen capture
+    Given leftover XKeen capture with no live XKeen process
     When netfilter-reconcile desired-present runs
     Then ErrExistingCaptureEngine is returned
     And no BTKN install mutations are committed

@@ -79,7 +79,10 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 
 	xkeen := ClassifyXKeen(natS, mangleS, listenOut, pidofOut, rules, pidofErr == nil)
 	report.XKeenState = xkeen
-	if xkeen == XKeenLive || xkeen == XKeenResidual {
+	if xkeen == XKeenLive {
+		report.XKeenActive = true
+	}
+	if xkeen == XKeenResidual {
 		report.XKeenActive = true
 		report.Collisions = append(report.Collisions, Collision{
 			Kind:   CollisionXKeen,
