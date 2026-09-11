@@ -38,12 +38,14 @@ var (
 	ErrResolverUnavailable     = errors.New("blackkey resolver unavailable")
 	ErrResolverRejected        = errors.New("blackkey resolver rejected")
 	ErrResolverInvalidResponse = errors.New("blackkey resolver invalid response")
+	ErrResolverNotConfigured   = errors.New("blackkey resolver not configured")
 )
 
 const (
 	ClassResolverUnavailable     = "BLACKKEY_RESOLVER_UNAVAILABLE"
 	ClassResolverRejected        = "BLACKKEY_RESOLVER_REJECTED"
 	ClassResolverInvalidResponse = "BLACKKEY_RESOLVER_INVALID_RESPONSE"
+	ClassResolverNotConfigured   = "BLACKKEY_RESOLVER_NOT_CONFIGURED"
 )
 
 func resolverUnavailable(err error) error {
@@ -73,6 +75,15 @@ func resolverInvalid(err error) error {
 	}
 }
 
+func resolverNotConfigured(err error) error {
+	return &persistClassError{
+		class:  ClassResolverNotConfigured,
+		status: http.StatusServiceUnavailable,
+		public: "Резолвер ключа не настроен.",
+		cause:  errors.Join(ErrResolverNotConfigured, err),
+	}
+}
+
 func wrapResolverError(err error) error {
 	if err == nil {
 		return nil
@@ -82,6 +93,8 @@ func wrapResolverError(err error) error {
 		return err
 	}
 	switch {
+	case errors.Is(err, ErrResolverNotConfigured):
+		return resolverNotConfigured(err)
 	case errors.Is(err, ErrResolverRejected):
 		return resolverRejected(err)
 	case errors.Is(err, ErrResolverInvalidResponse):

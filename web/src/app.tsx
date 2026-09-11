@@ -9,6 +9,7 @@ import {
   parseVersion,
   postConnection,
   postLogin,
+  postChangePassword,
   postProfile,
   postSetup,
   readJson,
@@ -39,6 +40,9 @@ export function App() {
 
   const [password, setPassword] = useState("");
   const [repeat, setRepeat] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRepeat, setNewRepeat] = useState("");
   const [blackKey, setBlackKey] = useState("");
   const [keyName, setKeyName] = useState("");
 
@@ -47,6 +51,9 @@ export function App() {
     setKeyName("");
     setPassword("");
     setRepeat("");
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewRepeat("");
     setStatus(defaultDisconnectedStatus());
     setScreen("login");
     setError(SESSION_EXPIRED_MESSAGE);
@@ -122,23 +129,30 @@ export function App() {
   function resetAuthFields() {
     setPassword("");
     setRepeat("");
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewRepeat("");
   }
 
   async function onSetup(ev: Event) {
     ev.preventDefault();
     setError("");
     setNotice("");
-    if (password.length < SETUP_MIN_LEN) {
+    const form = ev.currentTarget as HTMLFormElement;
+    const data = new FormData(form);
+    const submitted = String(data.get("password") ?? password).trim();
+    const submittedRepeat = String(data.get("repeat") ?? repeat).trim();
+    if (submitted.length < SETUP_MIN_LEN) {
       setError("Минимум 8 символов");
       return;
     }
-    if (password !== repeat) {
+    if (submitted !== submittedRepeat) {
       setError("Пароли не совпадают");
       return;
     }
     setBusy(true);
     try {
-      const res = await postSetup(password);
+      const res = await postSetup(submitted);
       const next = screenAfterSetupStatus(res.status);
       if (next === "login") {
         resetAuthFields();
@@ -147,7 +161,7 @@ export function App() {
         return;
       }
       if (next === "authenticate") {
-        const loginRes = await postLogin(password);
+        const loginRes = await postLogin(submitted);
         resetAuthFields();
         if (loginRes.status === 200) {
           await loadStatus();
@@ -170,9 +184,11 @@ export function App() {
     ev.preventDefault();
     setError("");
     setNotice("");
+    const form = ev.currentTarget as HTMLFormElement;
+    const submitted = String(new FormData(form).get("password") ?? password).trim();
     setBusy(true);
     try {
-      const res = await postLogin(password);
+      const res = await postLogin(submitted);
       if (res.status === 200) {
         resetAuthFields();
         await loadStatus();
@@ -278,6 +294,49 @@ export function App() {
     }
   }
 
+  async function onChangePassword(ev: Event) {
+    ev.preventDefault();
+    setError("");
+    setNotice("");
+    const form = ev.currentTarget as HTMLFormElement;
+    const data = new FormData(form);
+    const current = String(data.get("currentPassword") ?? currentPassword).trim();
+    const next = String(data.get("newPassword") ?? newPassword).trim();
+    const repeatVal = String(data.get("newRepeat") ?? newRepeat).trim();
+    if (next.length < SETUP_MIN_LEN) {
+      setError("Минимум 8 символов");
+      return;
+    }
+    if (next !== repeatVal) {
+      setError("Пароли не совпадают");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await postChangePassword(current, next);
+      if (res.status === 401) {
+        expireSession();
+        return;
+      }
+      if (res.status === 204) {
+        setCurrentPassword("");
+        setNewPassword("");
+        setNewRepeat("");
+        setNotice("Пароль панели изменён.");
+        return;
+      }
+      if (res.status === 403) {
+        setError("Неверный текущий пароль");
+        return;
+      }
+      setError("Не удалось сменить пароль");
+    } catch {
+      setError("Нет связи с устройством");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function openAdvanced() {
     setError("");
     setNotice("");
@@ -325,12 +384,6 @@ export function App() {
         notice={notice}
         onPassword={setPassword}
         onSubmit={onLogin}
-        onGoSetup={() => {
-          setError("");
-          setNotice("");
-          resetAuthFields();
-          setScreen("setup");
-        }}
       />
     );
   }
@@ -341,8 +394,18 @@ export function App() {
         version={version}
         status={status}
         error={error}
+        notice={notice}
+        busy={busy}
+        currentPassword={currentPassword}
+        newPassword={newPassword}
+        newRepeat={newRepeat}
+        onCurrentPassword={setCurrentPassword}
+        onNewPassword={setNewPassword}
+        onNewRepeat={setNewRepeat}
+        onChangePassword={onChangePassword}
         onBack={() => {
           setError("");
+          setNotice("");
           setScreen("main");
         }}
       />

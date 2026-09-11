@@ -70,7 +70,6 @@ export function LoginScreen(props: {
   notice: string;
   onPassword: (value: string) => void;
   onSubmit: (ev: Event) => void;
-  onGoSetup: () => void;
 }) {
   return (
     <main class="auth-shell">
@@ -106,11 +105,6 @@ export function LoginScreen(props: {
             Войти
           </Button>
         </form>
-        <p class="auth-aux">
-          <Button variant="ghost" onClick={props.onGoSetup}>
-            Первый запуск
-          </Button>
-        </p>
       </div>
     </main>
   );

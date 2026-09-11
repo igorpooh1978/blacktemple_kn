@@ -126,6 +126,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("POST /api/v1/auth/setup", s.handleSetup)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/v1/auth/password", s.handleChangePassword)
 	mux.HandleFunc("POST /api/v1/connection", s.handleConnection)
 	mux.HandleFunc("GET /api/v1/profiles", s.handleListProfiles)
 	mux.HandleFunc("POST /api/v1/profiles", s.handleImportProfile)
@@ -241,6 +242,32 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, sessionCookieValue(r, id, expires))
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSession(w, r) {
+		return
+	}
+	var body struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if err := decodeJSON(r, maxJSONBody, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := s.auth.ChangePassword(body.Current, body.New); err != nil {
+		switch {
+		case errors.Is(err, auth.ErrInvalidPassword):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "unauthorized"})
+		case errors.Is(err, auth.ErrPasswordTooShort):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "change failed"})
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

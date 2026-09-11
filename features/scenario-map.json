@@ -819,6 +819,11 @@
       "tests": ["src/internal/api/handler_test.go::TestSessionExpiryHTTP"],
       "redProof": "RED_PROOF_NOT_AVAILABLE: protected 401 already returned; UI maps it to LOGIN"
     },
+    "BTKN-AUTH-004": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestChangePasswordThenLogin"],
+      "redProof": "RED: TestChangePasswordThenLogin FAIL until POST /api/v1/auth/password updates the hash"
+    },
     "BTKN-PROF-008": {
       "priority": "P0",
       "tests": ["src/internal/profiles/persist_test.go::TestHTTPSImportParse"],
@@ -1057,6 +1062,31 @@
       "priority": "P0",
       "tests": ["src/internal/profiles/resolver_test.go::TestResolverSourcesNeverTouchNetfilter"],
       "redProof": "RED: TestResolverSourcesNeverTouchNetfilter FAIL if resolver sources call netfilter or XKeen"
+    },
+    "BTKN-R8-011": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/hmac_absent_test.go::TestProductionHMACLiteralAbsentFromTrackedSource"],
+      "redProof": "RED: TestProductionHMACLiteralAbsentFromTrackedSource FAIL while const blackKeyHMACKey literal remains"
+    },
+    "BTKN-R8-012": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestHTTPResolverRejectsHTTPURL"],
+      "redProof": "RED: TestHTTPResolverRejectsHTTPURL FAIL until scheme https is required"
+    },
+    "BTKN-R8-013": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestHTTPResolverRejectsUntrustedHost"],
+      "redProof": "RED: TestHTTPResolverRejectsUntrustedHost FAIL until host allowlist is enforced"
+    },
+    "BTKN-R8-014": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestHTTPResolverRejectsCrossHostRedirect"],
+      "redProof": "RED: TestHTTPResolverRejectsCrossHostRedirect FAIL until CheckRedirect blocks foreign hosts"
+    },
+    "BTKN-R8-015": {
+      "priority": "P0",
+      "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestMissingHMACPreservesLKG"],
+      "redProof": "RED: TestMissingHMACPreservesLKG FAIL until missing secret is fail-closed without wiping LKG"
     }
   }
 }

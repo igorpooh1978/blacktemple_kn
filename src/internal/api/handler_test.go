@@ -242,3 +242,26 @@ func TestAppNewWiresNilServices(t *testing.T) {
 		t.Fatalf("addr %s", a.Addr())
 	}
 }
+
+func TestChangePasswordThenLogin(t *testing.T) {
+	h, _, _ := newServer(t, time.Hour)
+	const next = "new-pass-88"
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/setup", map[string]string{"password": testPassword}, nil, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("setup %d", rec.Code)
+	}
+	login := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": testPassword}, nil, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %d", login.Code)
+	}
+	cookies := login.Result().Cookies()
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/password", map[string]string{"current": testPassword, "new": next}, cookies, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("change %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": testPassword}, nil, ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("old password %d", rec.Code)
+	}
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": next}, nil, ""); rec.Code != http.StatusOK {
+		t.Fatalf("new password %d %s", rec.Code, rec.Body.String())
+	}
+}

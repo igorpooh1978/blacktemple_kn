@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -73,6 +74,7 @@ func (s *passwordStore) initialized() bool {
 }
 
 func (s *passwordStore) setup(password string) error {
+	password = strings.TrimSpace(password)
 	if len(password) < 8 {
 		return ErrPasswordTooShort
 	}
@@ -103,6 +105,7 @@ func (s *passwordStore) setup(password string) error {
 }
 
 func (s *passwordStore) verify(password string) error {
+	password = strings.TrimSpace(password)
 	s.mu.Lock()
 	encoded := s.cached
 	ok := s.haveHash
@@ -113,6 +116,36 @@ func (s *passwordStore) verify(password string) error {
 	if !Verify(password, encoded) {
 		return ErrInvalidPassword
 	}
+	return nil
+}
+
+func (s *passwordStore) change(current, next string) error {
+	current = strings.TrimSpace(current)
+	next = strings.TrimSpace(next)
+	if len(next) < 8 {
+		return ErrPasswordTooShort
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.haveHash {
+		return ErrNotInitialized
+	}
+	if !Verify(current, s.cached) {
+		return ErrInvalidPassword
+	}
+	encoded, err := Hash(next, s.iter)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(filePayload{Hash: encoded})
+	if err != nil {
+		return err
+	}
+	if err := atomicWriteFile(s.path, payload, 0o600); err != nil {
+		return err
+	}
+	s.cached = encoded
+	s.haveHash = true
 	return nil
 }
 

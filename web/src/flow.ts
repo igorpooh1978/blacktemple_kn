@@ -34,6 +34,8 @@ export function importErrorMessage(httpStatus: number): string | "session" {
       return "Подписка слишком большая.";
     case 502:
       return "Не удалось обновить список серверов. Сохранённый рабочий сервер оставлен без изменений.";
+    case 503:
+      return "Резолвер ключа не настроен.";
     case 504:
       return "Сервер подписки не ответил вовремя.";
     default:

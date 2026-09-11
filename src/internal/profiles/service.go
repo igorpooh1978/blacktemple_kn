@@ -532,6 +532,13 @@ type loadedMeta struct {
 func (s *Service) load(ctx context.Context, raw string) (subscription.Result, loadedMeta, error) {
 	low := strings.ToLower(strings.TrimSpace(raw))
 	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		if s.resolver != nil {
+			return subscription.Result{}, loadedMeta{
+				kind:      "url",
+				source:    raw,
+				sanitized: sanitizeForID(raw),
+			}, nil
+		}
 		fetched, err := subscription.Fetch(ctx, s.client, raw)
 		if err != nil {
 			return subscription.Result{}, loadedMeta{}, err

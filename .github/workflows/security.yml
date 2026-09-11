@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  secrets-scan-placeholder:
+  secrets-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,3 +17,14 @@ jobs:
             exit 1
           fi
           echo "no apk/research-local tracked"
+      - name: block tracked HMAC key literal
+        run: |
+          if git grep -nE 'const[[:space:]]+blackKeyHMACKey[[:space:]]*=' -- '*.go' ':!*_test.go'; then
+            echo "production HMAC literal is tracked"
+            exit 1
+          fi
+          echo "no HMAC const literal in production Go"
+      - name: gitleaks working tree
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --no-git --source . --config .gitleaks.toml --verbose --redact --exit-code 1

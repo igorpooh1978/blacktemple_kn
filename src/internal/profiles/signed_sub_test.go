@@ -3,6 +3,7 @@ package profiles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 )
+
+const fixtureHMACKey = "fixture-blackkey-hmac-test-key-not-production"
 
 func TestHTTPResolverSignedGETReturnsWSCandidates(t *testing.T) {
 	const token = "fixture-token"
@@ -57,7 +60,7 @@ func TestHTTPResolverSignedGETReturnsWSCandidates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res := NewHTTPResolver(srv.Client())
+	res := testHTTPResolver(t, srv)
 	res.now = func() time.Time { return fixedNow }
 	n := 0
 	res.newID = func() string {
@@ -89,7 +92,7 @@ func TestHTTPResolverSignedGETReturnsWSCandidates(t *testing.T) {
 	if saw.device != blackKeyDevice {
 		t.Fatalf("device=%q", saw.device)
 	}
-	wantSig := blackKeySignature(blackKeyStringToSign("/sub/"+token, "1700000000", appID))
+	wantSig := blackKeySignature([]byte(fixtureHMACKey), blackKeyStringToSign("/sub/"+token, "1700000000", appID))
 	if saw.sig != wantSig {
 		t.Fatal("HMAC mismatch")
 	}
@@ -113,7 +116,7 @@ func TestHTTPResolverUnsignedResponseIsNotUsedAsJSON(t *testing.T) {
 		_, _ = w.Write([]byte(bootstrapRealityShare()))
 	}))
 	defer srv.Close()
-	res := NewHTTPResolver(srv.Client())
+	res := testHTTPResolver(t, srv)
 	got, err := res.Resolve(context.Background(), NewSource("url", srv.URL+"/sub/fixture-token"))
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +144,7 @@ func TestHTTPResolverImportUsesSignedFixture(t *testing.T) {
 		_, _ = w.Write(payload)
 	}))
 	defer srv.Close()
-	res := NewHTTPResolver(srv.Client())
+	res := testHTTPResolver(t, srv)
 	svc := New(Config{Client: srv.Client(), Resolver: res})
 	p, err := svc.Import(context.Background(), ImportRequest{BlackKey: srv.URL + "/sub/fixture-token", Name: "bk"})
 	if err != nil {
@@ -165,9 +168,12 @@ func TestHTTPResolverImportUsesSignedFixture(t *testing.T) {
 }
 
 func TestHTTPResolverRejectsMissingToken(t *testing.T) {
-	res := NewHTTPResolver(&http.Client{})
+	res := NewHTTPResolver(HTTPResolverConfig{
+		HMACKey:      []byte(fixtureHMACKey),
+		AllowedHosts: []string{"example.com"},
+	})
 	_, err := res.Resolve(context.Background(), NewSource("url", "https://example.com/"))
-	if err != ErrResolverRejected {
+	if !errors.Is(err, ErrResolverRejected) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -184,7 +190,7 @@ func TestHTTPResolverSecretsStayOutOfErrors(t *testing.T) {
 		http.Error(w, "token=super-secret", http.StatusBadGateway)
 	}))
 	defer srv.Close()
-	res := NewHTTPResolver(srv.Client())
+	res := testHTTPResolver(t, srv)
 	_, err := res.Resolve(context.Background(), NewSource("url", srv.URL+"/sub/super-secret"))
 	if err == nil {
 		t.Fatal("expected error")

@@ -62,3 +62,36 @@ Feature: Automatic BlackKey resolver
   Scenario: Resolver never invokes netfilter/XKeen
     Given resolver and profile sources
     Then they do not call ExecuteNetfilterReconcile S05xkeen iptables or ipset
+
+  @BTKN-R8-011 @P0 @profiles
+  Scenario: Provider signing credential is absent from tracked source
+    Given tracked Go source
+    Then no production BlackKey HMAC key literal is present
+
+  @BTKN-R8-012 @P0 @profiles
+  Scenario: Signed resolver rejects non-HTTPS URL
+    Given a BlackKey URL with scheme http
+    When Resolve runs
+    Then the request is not sent
+    And the resolver returns rejected
+
+  @BTKN-R8-013 @P0 @profiles
+  Scenario: Signed resolver rejects untrusted host
+    Given a HTTPS BlackKey URL whose host is not on the local allowlist
+    When Resolve runs
+    Then signed provider headers are not sent
+    And the resolver returns rejected
+
+  @BTKN-R8-014 @P0 @profiles
+  Scenario: Signed resolver rejects cross-host redirect
+    Given an allowlisted HTTPS subscription that redirects to a foreign host
+    When Resolve runs
+    Then signature headers are not forwarded to the foreign host
+
+  @BTKN-R8-015 @P0 @profiles
+  Scenario: Missing local resolver credential preserves existing LKG
+    Given a profile with last-known-good
+    And the local HMAC secret file is absent
+    When Resolve runs
+    Then last-known-good is unchanged
+    And Connect still uses the stored candidates

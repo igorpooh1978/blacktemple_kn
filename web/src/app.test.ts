@@ -49,6 +49,7 @@ describe("first-run flow", () => {
     expect(importErrorMessage(400)).toBe(
       "Ключ или подписка имеют неизвестный формат.",
     );
+    expect(importErrorMessage(503)).toBe("Резолвер ключа не настроен.");
   });
 });
 
@@ -74,5 +75,6 @@ describe("Russian labels", () => {
     expect(importSuccessNotice(0)).toBe("Готово");
     expect(noticeAlertTone("VPN engine ещё не готов")).toBe("warning");
     expect(noticeAlertTone("Пароль уже задан. Войдите.")).toBe("info");
+    expect(noticeAlertTone("Пароль панели изменён.")).toBe("success");
   });
 });
