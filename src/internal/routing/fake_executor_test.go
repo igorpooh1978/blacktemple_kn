@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -26,16 +27,20 @@ type fakeExecutor struct {
 	ssErr     error
 	tcpOut    string
 	udpOut    string
+	tcp6Out   string
+	udp6Out   string
 	pidofOut  string
 	pidofErr  error
 	exeByPID  map[int]string
 
-	failAtMut      int
-	mutCount       int
-	failErr        error
-	failDetach     bool
-	failPermission bool
-	ipsetPresent   bool
+	failAtMut           int
+	mutCount            int
+	failErr             error
+	failDetach          bool
+	failPermission      bool
+	ipsetPresent        bool
+	busyBoxTable        bool
+	addrtypeUnavailable bool
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -55,6 +60,20 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call)
+
+	if f.busyBoxTable && name == "ip" && hasToken(args, strconv.Itoa(RouteTable)) {
+		msg := "ip: invalid argument '" + strconv.Itoa(RouteTable) + "' to 'table'\n"
+		if isProbe(name, args) {
+			return msg, errors.New("exit status 1")
+		}
+		f.mutCount++
+		return msg, errors.New("exit status 1")
+	}
+
+	if f.addrtypeUnavailable && name == "iptables" && hasToken(args, "addrtype") {
+		f.mutCount++
+		return "iptables: No chain/target/match by that name.\n", errors.New("exit status 1")
+	}
 
 	if !isProbe(name, args) {
 		f.mutCount++
@@ -99,6 +118,10 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 			return f.udpOut, nil
 		}
 		return f.ssOut, nil
+	case name == "cat" && hasToken(args, "/proc/net/tcp6"):
+		return f.tcp6Out, nil
+	case name == "cat" && hasToken(args, "/proc/net/udp6"):
+		return f.udp6Out, nil
 	case name == "cat":
 		return f.ssOut, nil
 	case name == "readlink":

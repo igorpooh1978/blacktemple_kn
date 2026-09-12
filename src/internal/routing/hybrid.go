@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -120,7 +121,11 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	}
 
 	for _, c := range e.installCommands() {
-		if _, err := e.exec.Run(ctx, c.Name, c.Args...); err != nil {
+		out, err := e.exec.Run(ctx, c.Name, c.Args...)
+		if err != nil {
+			if isOwnedTableUnsupported(c, out, err) || isAddrtypeMatchUnavailable(c, out, err) {
+				continue
+			}
 			if rbErr := e.Remove(ctx); rbErr != nil {
 				return errors.Join(err, rbErr)
 			}
@@ -245,6 +250,9 @@ func isTableAbsent(out string, err error) bool {
 	if err != nil {
 		msg = strings.ToLower(err.Error() + " " + msg)
 	}
+	if isBusyBoxHighTableID(msg) {
+		return true
+	}
 	for _, tok := range []string{
 		"does not exist",
 		"no such file",
@@ -260,6 +268,37 @@ func isTableAbsent(out string, err error) bool {
 	return false
 }
 
+func isBusyBoxHighTableID(msg string) bool {
+	table := strconv.Itoa(RouteTable)
+	return strings.Contains(msg, "invalid argument") && strings.Contains(msg, table)
+}
+
+func isOwnedTableUnsupported(c Argv, out string, err error) bool {
+	if c.Name != "ip" || err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(out + "\n" + err.Error()))
+	if !isBusyBoxHighTableID(msg) {
+		return false
+	}
+	table := strconv.Itoa(RouteTable)
+	return hasToken(c.Args, table)
+}
+
+// KN-1011 lists xt_addrtype in modules, but iptables -m addrtype still
+// returns "No chain/target/match". RFC1918/localhost/multicast stay DIRECT
+// via btkn_exclude_v4. Skipping only addrtype argv; other match failures fail Apply.
+func isAddrtypeMatchUnavailable(c Argv, out string, err error) bool {
+	if c.Name != "iptables" || err == nil {
+		return false
+	}
+	if !hasToken(c.Args, "addrtype") {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(out + "\n" + err.Error()))
+	return strings.Contains(msg, "no chain/target/match")
+}
+
 // isAbsentObjectFailure reports idempotent absence of an owned object.
 // CommandExecutor returns CombinedOutput in output and often only
 // "exit status 1" in err, so both must be inspected. A bare exit status
@@ -269,6 +308,9 @@ func isAbsentObjectFailure(output string, err error) bool {
 		return false
 	}
 	msg := strings.ToLower(strings.TrimSpace(output + "\n" + err.Error()))
+	if isBusyBoxHighTableID(msg) {
+		return true
+	}
 	for _, tok := range []string{
 		"bad rule",
 		"no chain/target/match",

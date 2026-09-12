@@ -156,7 +156,11 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 	if setter, ok := eng.(interface {
 		SetExpectedListener(routing.ExpectedListener)
 	}); ok {
-		setter.SetExpectedListener(routing.ExpectedListener{Executable: cmd.XrayPath})
+		pid, _, found := FindOurXrayProcess(cmd.XrayPath)
+		if !found {
+			pid = 0
+		}
+		setter.SetExpectedListener(routing.ExpectedListener{Executable: cmd.XrayPath, PID: pid})
 	}
 
 	if err := eng.Reconcile(ctx, desired); err != nil {

@@ -101,15 +101,28 @@ func (e *HybridIptablesEngine) probeListenText(ctx context.Context) (string, err
 	if ssErr == nil {
 		return ssOut, nil
 	}
-	tcpOut, tcpErr := e.exec.Run(ctx, "cat", "/proc/net/tcp")
-	if tcpErr != nil {
-		return "", tcpErr
+	var b strings.Builder
+	var lastErr error
+	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6"} {
+		out, err := e.exec.Run(ctx, "cat", path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		b.WriteString(out)
+		b.WriteByte('\n')
 	}
-	udpOut, udpErr := e.exec.Run(ctx, "cat", "/proc/net/udp")
-	if udpErr != nil {
-		return "", udpErr
+	text := b.String()
+	if strings.TrimSpace(text) == "" {
+		if ssErr != nil {
+			return "", ssErr
+		}
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", fmt.Errorf("%w: listen probes empty", ErrPreflightProbe)
 	}
-	return tcpOut + "\n" + udpOut, nil
+	return text, nil
 }
 
 func (e *HybridIptablesEngine) probePortOwners(ctx context.Context, listenOut string, port int) ([]string, error) {
@@ -244,6 +257,11 @@ func portOccupiedForeign(listenOut string, owners []string, port int, expected E
 		exe = OurXrayExecutable
 	}
 	if len(owners) == 0 {
+		// /proc/net has no pid= field. If OUR Xray is the expected
+		// listener and is alive, 11820 belongs to the capture engine.
+		if expected.PID > 0 {
+			return false
+		}
 		return true
 	}
 	for _, o := range owners {

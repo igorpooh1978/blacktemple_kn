@@ -52,3 +52,18 @@ Feature: R6-I live selected-client routing
     Given live acceptance has finished
     Then capture.enabled is persisted false
     And netfilter-reconcile desired is absent
+
+  @BTKN-R6I-LIVE-009 @P0 @routing
+  Scenario: BusyBox ip rejecting table 4254 still applies BTKN TCP capture
+    Given ip route show table 4254 returns invalid argument
+    When Apply runs
+    Then BTKN PREROUTING TCP REDIRECT is installed
+    And XKeen mark 0x111 is not deleted
+
+  @BTKN-R6I-LIVE-010 @P0 @routing
+  Scenario: Missing iptables addrtype still applies BTKN TCP capture
+    Given iptables -m addrtype returns no chain/target/match
+    When Apply runs
+    Then BTKN PREROUTING TCP REDIRECT is installed
+    And RFC1918 destinations still RETURN via btkn_exclude_v4
+    And XKeen mark 0x111 is not deleted

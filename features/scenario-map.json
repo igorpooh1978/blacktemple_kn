@@ -1134,6 +1134,24 @@
       "priority": "P0",
       "tests": ["src/internal/platform/capturecfg_test.go::TestSetCaptureEnabledRoundTrip"],
       "redProof": "RED: TestSetCaptureEnabledRoundTrip FAIL until capture.enabled can be persisted false after true"
+    },
+    "BTKN-R6I-LIVE-009": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254DoesNotBlockApply",
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254RemoveIsIdempotent",
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254IsNotPreflightCollision",
+        "src/internal/routing/hybrid_test.go::TestXKeenIPv6WildcardListenIsLive",
+        "src/internal/routing/hybrid_test.go::TestProcNet11820WithExpectedPIDIsOurs"
+      ],
+      "redProof": "RED: TestBusyBoxTable4254DoesNotBlockApply FAIL until BusyBox invalid argument 4254 is skipped and TCP Apply succeeds"
+    },
+    "BTKN-R6I-LIVE-010": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestAddrtypeMatchUnavailableDoesNotBlockApply"
+      ],
+      "redProof": "RED: TestAddrtypeMatchUnavailableDoesNotBlockApply FAIL until addrtype no chain/target/match is skipped and TCP Apply succeeds"
     }
   }
 }

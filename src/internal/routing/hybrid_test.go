@@ -238,6 +238,127 @@ func TestPREROUTINGInsertedAtHead(t *testing.T) {
 	}
 }
 
+func TestBusyBoxTable4254DoesNotBlockApply(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("BusyBox ip rejecting table 4254 must still Apply TCP capture: %v", err)
+	}
+	if !eng.applied {
+		t.Fatal("applied")
+	}
+	if !planHasSeq(fx.snapshot(), "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump missing after BusyBox table skip")
+	}
+	for _, c := range fx.snapshot() {
+		if c.Name == "ip" && hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+}
+
+func TestBusyBoxTable4254RemoveIsIdempotent(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	if err := eng.Remove(context.Background()); err != nil {
+		t.Fatalf("Remove on BusyBox without table 4254: %v", err)
+	}
+}
+
+func TestAddrtypeMatchUnavailableDoesNotBlockApply(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	fx.addrtypeUnavailable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("iptables addrtype unavailable must still Apply TCP capture: %v", err)
+	}
+	if !eng.applied {
+		t.Fatal("applied")
+	}
+	snap := fx.snapshot()
+	if !planHasSeq(snap, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump missing after addrtype skip")
+	}
+	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT 11820 missing after addrtype skip")
+	}
+	if !planHasSeq(snap, "add", SetExcludeV4, "172.16.0.0/12", "-exist") {
+		t.Fatal("RFC1918 exclude missing; addrtype skip must not drop ipset RETURN")
+	}
+	for _, c := range snap {
+		if c.Name == "ip" && hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+}
+
+func TestBusyBoxTable4254IsNotPreflightCollision(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if hasKind(rep, CollisionTable) {
+		t.Fatalf("unsupported table 4254 must not collide: %+v", rep)
+	}
+}
+
+func TestXKeenIPv6WildcardListenIsLive(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssErr = errors.New("ss: not found")
+	fx.tcpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	fx.udpOut = fx.tcpOut
+	fx.tcp6Out = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000000000000000000000000000:049D 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1"
+	fx.udp6Out = fx.tcp6Out
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.XKeenState != XKeenLive {
+		t.Fatalf(":::1181 in tcp6 must be XKeenLive, got %s", rep.XKeenState)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply beside tcp6 XKeen: %v", err)
+	}
+}
+
+func TestProcNet11820WithExpectedPIDIsOurs(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssErr = errors.New("ss: not found")
+	fx.tcpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:2E2C 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1 0000000000000000 100 0 0 10 0"
+	fx.udpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\n"
+	fx.exeByPID = map[int]string{42: OurXrayExecutable}
+	eng := newTestEngine(t, fx)
+	eng.SetExpectedListener(ExpectedListener{Executable: OurXrayExecutable, PID: 42})
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("OUR Xray on 11820 without ss pid must Apply: %v", err)
+	}
+}
+
 func TestXKeenLiveAllowsApplyWithoutMutatingXKeen(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -m comment --comment xkeen_rule -p tcp -j REDIRECT --to-ports 1181"
