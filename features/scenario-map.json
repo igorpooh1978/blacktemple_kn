@@ -1152,6 +1152,36 @@
         "src/internal/routing/hybrid_test.go::TestAddrtypeMatchUnavailableDoesNotBlockApply"
       ],
       "redProof": "RED: TestAddrtypeMatchUnavailableDoesNotBlockApply FAIL until addrtype no chain/target/match is skipped and TCP Apply succeeds"
+    },
+    "BTKN-R6I-UDP-001": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/iproute2_test.go::TestResolveIPRoute2PrefersFullOverBusyBox"],
+      "redProof": "RED: TestResolveIPRoute2PrefersFullOverBusyBox FAIL until /opt/libexec/ip-full wins over BusyBox PATH ip"
+    },
+    "BTKN-R6I-UDP-002": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestFullIPRoute2InstallsTable4254"],
+      "redProof": "RED: TestFullIPRoute2InstallsTable4254 FAIL until Apply uses full iproute2 for fwmark 4254"
+    },
+    "BTKN-R6I-UDP-003": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestMissingFullIPRoute2FailsUDPExplicitly"],
+      "redProof": "RED: TestMissingFullIPRoute2FailsUDPExplicitly FAIL until BusyBox omits TPROXY and reports IPROUTE2_FULL_REQUIRED"
+    },
+    "BTKN-R6I-UDP-004": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestMissingAddrtypeUsesExcludeFallback"],
+      "redProof": "RED: TestMissingAddrtypeUsesExcludeFallback FAIL until Plan omits addrtype and keeps RFC1918 exclude"
+    },
+    "BTKN-R6I-UDP-005": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL if Apply deletes 0x111 or table 111"
+    },
+    "BTKN-R6I-UDP-006": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestUDPTProxyPlanReachesCapturePort"],
+      "redProof": "RED: TestUDPTProxyPlanReachesCapturePort FAIL until TPROXY 11820 mark 0x42544b4e is in the plan"
     }
   }
 }

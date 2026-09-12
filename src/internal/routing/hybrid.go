@@ -25,12 +25,17 @@ var _ TrafficCaptureEngine = (*HybridIptablesEngine)(nil)
 //
 // IPv6 capture is UNVERIFIED and is not enabled.
 type HybridIptablesEngine struct {
-	mu       sync.Mutex
-	client   netip.Addr
-	exec     Executor
-	guard    KeeneticPolicyGuard
-	applied  bool
-	expected ExpectedListener
+	mu            sync.Mutex
+	client        netip.Addr
+	exec          Executor
+	guard         KeeneticPolicyGuard
+	applied       bool
+	expected      ExpectedListener
+	ipPath        string
+	ipConfigured  string
+	policyRouting bool
+	addrtype      bool
+	capsKnown     bool
 }
 
 // NewHybridIptablesEngine builds an IPv4 hybrid engine. exec must be non-nil.
@@ -62,6 +67,62 @@ func (e *HybridIptablesEngine) SetExpectedListener(l ExpectedListener) {
 		l.Executable = OurXrayExecutable
 	}
 	e.expected = l
+}
+
+// SetRoutingCaps records probed or test-injected routing capabilities.
+// Plan/Apply then omit unsupported addrtype and UDP policy-routing argv.
+func (e *HybridIptablesEngine) SetRoutingCaps(ipPath string, policyRouting, addrtype bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ipPath = ipPath
+	e.policyRouting = policyRouting
+	e.addrtype = addrtype
+	e.capsKnown = true
+}
+
+// SetIPRoute2Configured sets the explicit production path (init env / package).
+func (e *HybridIptablesEngine) SetIPRoute2Configured(path string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ipConfigured = path
+}
+
+const capAddrtypeChain = "BTKN_CAP_AT"
+
+// ProbeCapabilities resolves full iproute2 and addrtype without relying on PATH.
+func (e *HybridIptablesEngine) ProbeCapabilities(ctx context.Context) {
+	e.mu.Lock()
+	configured := e.ipConfigured
+	exec := e.exec
+	e.mu.Unlock()
+	path, ok := ResolveIPRoute2(ctx, exec, configured)
+	addr := probeAddrtype(ctx, exec)
+	e.mu.Lock()
+	e.ipPath = path
+	e.policyRouting = ok
+	e.addrtype = addr
+	e.capsKnown = true
+	e.mu.Unlock()
+}
+
+func probeAddrtype(ctx context.Context, exec Executor) bool {
+	if exec == nil {
+		return false
+	}
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+	if _, err := exec.Run(ctx, "iptables", "-t", "nat", "-N", capAddrtypeChain); err != nil {
+		_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+		_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+		return false
+	}
+	_, err := exec.Run(ctx, "iptables", "-t", "nat", "-A", capAddrtypeChain, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN")
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func (e *HybridIptablesEngine) validateClient() error {
@@ -109,6 +170,13 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 		return nil
 	}
 
+	e.mu.Lock()
+	known := e.capsKnown
+	e.mu.Unlock()
+	if !known {
+		e.ProbeCapabilities(ctx)
+	}
+
 	report, err := e.Preflight(ctx)
 	if err != nil {
 		return err
@@ -121,11 +189,8 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	}
 
 	for _, c := range e.installCommands() {
-		out, err := e.exec.Run(ctx, c.Name, c.Args...)
+		_, err := e.exec.Run(ctx, c.Name, c.Args...)
 		if err != nil {
-			if isOwnedTableUnsupported(c, out, err) || isAddrtypeMatchUnavailable(c, out, err) {
-				continue
-			}
 			if rbErr := e.Remove(ctx); rbErr != nil {
 				return errors.Join(err, rbErr)
 			}
@@ -203,11 +268,12 @@ func (e *HybridIptablesEngine) verifyRemoved(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: verify mangle -S: %v", ErrCleanupIncomplete, err)
 	}
-	rules, err := e.exec.Run(ctx, "ip", "-4", "rule", "show")
+	ip := e.ipBin()
+	rules, err := e.exec.Run(ctx, ip, "-4", "rule", "show")
 	if err != nil {
 		return fmt.Errorf("%w: verify ip rule: %v", ErrCleanupIncomplete, err)
 	}
-	tableOut, tableErr := e.exec.Run(ctx, "ip", "-4", "route", "show", "table", fmt.Sprintf("%d", RouteTable))
+	tableOut, tableErr := e.exec.Run(ctx, ip, "-4", "route", "show", "table", fmt.Sprintf("%d", RouteTable))
 	if jumpPresent(natS, "PREROUTING", ChainPRE) || jumpPresent(mangleS, "PREROUTING", ChainPRE) {
 		return fmt.Errorf("%w: PREROUTING still jumps to %s", ErrCleanupIncomplete, ChainPRE)
 	}
@@ -271,32 +337,6 @@ func isTableAbsent(out string, err error) bool {
 func isBusyBoxHighTableID(msg string) bool {
 	table := strconv.Itoa(RouteTable)
 	return strings.Contains(msg, "invalid argument") && strings.Contains(msg, table)
-}
-
-func isOwnedTableUnsupported(c Argv, out string, err error) bool {
-	if c.Name != "ip" || err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(out + "\n" + err.Error()))
-	if !isBusyBoxHighTableID(msg) {
-		return false
-	}
-	table := strconv.Itoa(RouteTable)
-	return hasToken(c.Args, table)
-}
-
-// KN-1011 lists xt_addrtype in modules, but iptables -m addrtype still
-// returns "No chain/target/match". RFC1918/localhost/multicast stay DIRECT
-// via btkn_exclude_v4. Skipping only addrtype argv; other match failures fail Apply.
-func isAddrtypeMatchUnavailable(c Argv, out string, err error) bool {
-	if c.Name != "iptables" || err == nil {
-		return false
-	}
-	if !hasToken(c.Args, "addrtype") {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(out + "\n" + err.Error()))
-	return strings.Contains(msg, "no chain/target/match")
 }
 
 // isAbsentObjectFailure reports idempotent absence of an owned object.

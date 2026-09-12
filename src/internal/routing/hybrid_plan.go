@@ -18,10 +18,42 @@ func ipset(args ...string) Argv {
 	return Argv{Name: "ipset", Args: cp}
 }
 
-func ipcmd(args ...string) Argv {
+func ipcmd(bin string, args ...string) Argv {
+	if bin == "" {
+		bin = "ip"
+	}
 	cp := make([]string, len(args))
 	copy(cp, args)
-	return Argv{Name: "ip", Args: cp}
+	return Argv{Name: bin, Args: cp}
+}
+
+func addrtypeReturns(table, chain string) []Argv {
+	out := make([]Argv, 0, 3)
+	for _, kind := range []string{"LOCAL", "BROADCAST", "MULTICAST"} {
+		out = append(out, iptables("-t", table, "-A", chain, "-m", "addrtype", "--dst-type", kind, "-j", "RETURN"))
+	}
+	return out
+}
+
+func (e *HybridIptablesEngine) ipBin() string {
+	if e.ipPath != "" {
+		return e.ipPath
+	}
+	return "ip"
+}
+
+func (e *HybridIptablesEngine) useAddrtype() bool {
+	if !e.capsKnown {
+		return true
+	}
+	return e.addrtype
+}
+
+func (e *HybridIptablesEngine) usePolicyRouting() bool {
+	if !e.capsKnown {
+		return true
+	}
+	return e.policyRouting
 }
 
 func (e *HybridIptablesEngine) installCommands() []Argv {
@@ -29,6 +61,7 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 	port := strconv.Itoa(CapturePort)
 	table := strconv.Itoa(RouteTable)
 	pref := strconv.Itoa(RulePreference)
+	ip := e.ipBin()
 
 	cmds := []Argv{
 		ipset("create", SetClientsV4, "hash:ip", "family", "inet", "-exist"),
@@ -50,48 +83,45 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 	)
 
 	// TCP REDIRECT: selected LAN client → nat PREROUTING → private/local
-	// exclusion → REDIRECT → 11820.
+	// exclusion → REDIRECT → 11820. addrtype is omitted when the match
+	// is unavailable; RFC1918/localhost stay DIRECT via btkn_exclude_v4.
 	cmds = append(cmds,
 		iptables("-t", "nat", "-A", ChainPRE, "-m", "set", "!", "--match-set", SetClientsV4, "src", "-j", "RETURN"),
 		iptables("-t", "nat", "-A", ChainPRE, "-j", ChainTCP),
 		iptables("-t", "nat", "-A", ChainTCP, "-m", "set", "--match-set", SetExcludeV4, "dst", "-j", "RETURN"),
-		iptables("-t", "nat", "-A", ChainTCP, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN"),
-		iptables("-t", "nat", "-A", ChainTCP, "-m", "addrtype", "--dst-type", "BROADCAST", "-j", "RETURN"),
-		iptables("-t", "nat", "-A", ChainTCP, "-m", "addrtype", "--dst-type", "MULTICAST", "-j", "RETURN"),
+	)
+	if e.useAddrtype() {
+		cmds = append(cmds, addrtypeReturns("nat", ChainTCP)...)
+	}
+	cmds = append(cmds,
 		iptables("-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", port),
 	)
 
-	// UDP TPROXY: hardware-proven XKeen order, BTKN mark/port/table only.
-	// ESTABLISHED,RELATED → CONNMARK restore; DNAT/INVALID RETURN;
-	// exclusions RETURN; socket --transparent → MARK (never RETURN without mark);
-	// mark!=0 → CONNMARK save; TPROXY.
-	cmds = append(cmds,
-		iptables("-t", "mangle", "-A", ChainPRE, "-m", "set", "!", "--match-set", SetClientsV4, "src", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainPRE, "-j", ChainUDP),
-		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "CONNMARK", "--restore-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "DNAT", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "INVALID", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "set", "--match-set", SetExcludeV4, "dst", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "BROADCAST", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-m", "addrtype", "--dst-type", "MULTICAST", "-j", "RETURN"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-xmark", mark),
-		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "mark", "!", "--mark", "0x0", "-j", "CONNMARK", "--save-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
-		iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", port, "--tproxy-mark", mark),
-	)
+	if e.usePolicyRouting() {
+		// UDP TPROXY: hardware-proven XKeen order, BTKN mark/port/table only.
+		cmds = append(cmds,
+			iptables("-t", "mangle", "-A", ChainPRE, "-m", "set", "!", "--match-set", SetClientsV4, "src", "-j", "RETURN"),
+			iptables("-t", "mangle", "-A", ChainPRE, "-j", ChainUDP),
+			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "CONNMARK", "--restore-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
+			iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "DNAT", "-j", "RETURN"),
+			iptables("-t", "mangle", "-A", ChainUDP, "-m", "conntrack", "--ctstate", "INVALID", "-j", "RETURN"),
+			iptables("-t", "mangle", "-A", ChainUDP, "-m", "set", "--match-set", SetExcludeV4, "dst", "-j", "RETURN"),
+		)
+		if e.useAddrtype() {
+			cmds = append(cmds, addrtypeReturns("mangle", ChainUDP)...)
+		}
+		cmds = append(cmds,
+			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-xmark", mark),
+			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "mark", "!", "--mark", "0x0", "-j", "CONNMARK", "--save-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
+			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", port, "--tproxy-mark", mark),
+			ipcmd(ip, "-4", "rule", "add", "fwmark", mark, "lookup", table, "pref", pref),
+			ipcmd(ip, "-4", "route", "add", "local", "default", "dev", "lo", "table", table),
+			iptables("-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE),
+		)
+	}
 
-	cmds = append(cmds,
-		ipcmd("-4", "rule", "add", "fwmark", mark, "lookup", table, "pref", pref),
-		ipcmd("-4", "route", "add", "local", "default", "dev", "lo", "table", table),
-	)
-
-	// Insert at PREROUTING head so the selected client is classified before
-	// foreign jumps (including live XKeen). Non-selected sources RETURN
-	// immediately and continue to later chains. Attach last so a partial
-	// Apply before this point does not capture.
 	cmds = append(cmds,
 		iptables("-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE),
-		iptables("-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE),
 	)
 	return cmds
 }
@@ -99,6 +129,7 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 func (e *HybridIptablesEngine) removeCommands() []Argv {
 	mark := tproxyMarkSpec()
 	table := strconv.Itoa(RouteTable)
+	ip := e.ipBin()
 
 	// Detach our jumps first. Never flush PREROUTING or foreign chains.
 	return []Argv{
@@ -116,8 +147,8 @@ func (e *HybridIptablesEngine) removeCommands() []Argv {
 		iptables("-t", "mangle", "-X", ChainUDP),
 		iptables("-t", "mangle", "-X", ChainPRE),
 		iptables("-t", "mangle", "-X", ChainOUT),
-		ipcmd("-4", "rule", "del", "fwmark", mark, "lookup", table),
-		ipcmd("-4", "route", "del", "local", "default", "dev", "lo", "table", table),
+		ipcmd(ip, "-4", "rule", "del", "fwmark", mark, "lookup", table),
+		ipcmd(ip, "-4", "route", "del", "local", "default", "dev", "lo", "table", table),
 		ipset("destroy", SetClientsV4),
 		ipset("destroy", SetExcludeV4),
 	}

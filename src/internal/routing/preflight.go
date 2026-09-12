@@ -25,12 +25,13 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 	if err != nil {
 		return PreflightReport{}, fmt.Errorf("%w: iptables mangle -S: %v", ErrPreflightProbe, err)
 	}
-	rules, err := e.exec.Run(ctx, "ip", "-4", "rule", "show")
+	ip := e.ipBin()
+	rules, err := e.exec.Run(ctx, ip, "-4", "rule", "show")
 	if err != nil {
 		return PreflightReport{}, fmt.Errorf("%w: ip rule show: %v", ErrPreflightProbe, err)
 	}
 
-	tableOut, tableErr := e.exec.Run(ctx, "ip", "-4", "route", "show", "table", strconv.Itoa(RouteTable))
+	tableOut, tableErr := e.exec.Run(ctx, ip, "-4", "route", "show", "table", strconv.Itoa(RouteTable))
 	if tableErr != nil && !isTableAbsent(tableOut, tableErr) {
 		return PreflightReport{}, fmt.Errorf("%w: ip route show table %d: %v", ErrPreflightProbe, RouteTable, tableErr)
 	}
@@ -89,6 +90,15 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 			Detail: "xkeen capture engine detected " + string(xkeen),
 		})
 	}
+
+	if e.usePolicyRouting() {
+		report.UDPCapture = UDPCaptureSupported
+		report.IPRoute2 = e.ipBin()
+	} else {
+		report.UDPCapture = UDPCaptureUnsupported
+		report.IPRoute2 = ClassIPRoute2FullRequired
+	}
+	report.Addrtype = e.useAddrtype()
 
 	if len(report.Collisions) > 0 {
 		report.OK = false

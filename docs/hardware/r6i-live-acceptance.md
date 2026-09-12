@@ -4,6 +4,51 @@ Filled from real KN-1011 SSH sessions. Unit tests are not hardware PASS.
 No IP, MAC, BlackKey, HMAC, or provider host values belong here.
 Test client alias: `TEST_CLIENT-A`. Other XKeen device alias: `XKEEN-CLIENT-B`.
 
+## 2026-09-12 UDP iproute2 fix
+
+```text
+ENTWARE:
+  ip-full installed: YES (provision opkg install, not daemon)
+  package version: 4.4.0-11
+  files: /opt/libexec/ip-full
+  invoke: /opt/sbin/ip -> /opt/libexec/ip-full (argv0 must be "ip")
+  BusyBox ip: /opt/bin/busybox (still present; still rejects table 4254)
+
+CAPABILITY (isolated, then removed):
+  ip rule add fwmark 0x42544b4e lookup 4254 pref 4254: PASS
+  route add local default dev lo table 4254: PASS
+  XKeen mark 0x111 / table 111 unchanged during probe
+  addrtype: NO (plan omits addrtype; RFC1918 via btkn_exclude_v4)
+
+PRODUCTION:
+  ResolveIPRoute2 prefers /opt/libexec/ip-full
+  BTKN_IPROUTE2 export from S99 when ip-full exists
+  missing full ip: UDP TPROXY omitted, IPROUTE2_FULL_REQUIRED, TCP still Apply
+  IPK Depends: ip-full (unchanged)
+
+APPLY (production netfilter-reconcile):
+  BTKN nat+mangle PREROUTING position 1: YES
+  fwmark 0x42544b4e lookup 4254: PRESENT
+  table 4254 local default dev lo: PRESENT
+  selected set count: 1
+  XKEEN-CLIENT-B not in ipset
+  OUTPUT BTKN: 0
+  XKeen PID 20972 / 1181 / 0x111 / table 111 unchanged
+
+LIVE UDP FROM TEST_CLIENT-A:
+  25s window: TCP REDIRECT pkts=0, TPROXY pkts=0, conntrack 11820=0
+  TEST_CLIENT-A generated no captured packets this window
+  UDP TPROXY ROUTING = NOT VERIFIED (path installed; no client UDP observed)
+  TCP REGRESSION this window = FAIL (no packets; prior session TCP remains VERIFIED)
+
+CLEANUP:
+  capture.enabled=false
+  BTKN chains/ipset/fwmark/table 4254 gone
+  11820 inactive
+  SSH alive, XKeen unchanged
+  rescue disarmed
+```
+
 ## 2026-09-12 live Apply
 
 ```text

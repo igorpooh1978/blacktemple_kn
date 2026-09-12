@@ -23,6 +23,7 @@ func newTestEngine(t *testing.T, fx *fakeExecutor) *HybridIptablesEngine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	eng.SetRoutingCaps("ip", true, true)
 	return eng
 }
 
@@ -159,6 +160,99 @@ func TestUDPTProxyPlan(t *testing.T) {
 	}
 }
 
+func TestUDPTProxyPlanReachesCapturePort(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", "127.0.0.1", "--on-port", "11820", "--tproxy-mark", "0x42544b4e/0xffffffff") {
+		t.Fatal("UDP TPROXY to 11820 missing")
+	}
+}
+
+func TestFullIPRoute2InstallsTable4254(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	snap := fx.snapshot()
+	if !planHasSeq(snap, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254") {
+		t.Fatal("fwmark lookup 4254 missing")
+	}
+	if !planHasSeq(snap, "-4", "route", "add", "local", "default", "dev", "lo", "table", "4254") {
+		t.Fatal("table 4254 local default missing")
+	}
+	found := false
+	for _, c := range snap {
+		if c.Name == IPRoute2FullBinary && hasToken(c.Args, "lookup") {
+			found = true
+		}
+		if hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+	if !found {
+		t.Fatal("policy routing must exec /opt/libexec/ip-full")
+	}
+}
+
+func TestMissingFullIPRoute2FailsUDPExplicitly(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.pathIPBusyBox = true
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("", false, true)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.UDPCapture != UDPCaptureUnsupported || rep.IPRoute2 != ClassIPRoute2FullRequired {
+		t.Fatalf("UDP must fail closed: %+v", rep)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("TCP Apply: %v", err)
+	}
+	snap := fx.snapshot()
+	if planHasSeq(snap, "-j", "TPROXY") || planHasSeq(snap, "lookup", "4254") {
+		t.Fatal("must not install half-working UDP TPROXY without full iproute2")
+	}
+	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT must remain")
+	}
+}
+
+func TestMissingAddrtypeUsesExcludeFallback(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps("ip", true, false)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planHasSeq(p.Install, "addrtype") {
+		t.Fatal("addrtype must be absent from the KN plan")
+	}
+	if !planHasIPSetAdd(p.Install, SetExcludeV4, "172.16.0.0/12") {
+		t.Fatal("RFC1918 exclude missing")
+	}
+	if !planHasSeq(p.Install, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT missing")
+	}
+}
+
 func TestMarkTableCollision(t *testing.T) {
 	t.Run("mark", func(t *testing.T) {
 		fx := newFakeExecutor()
@@ -247,6 +341,7 @@ func TestBusyBoxTable4254DoesNotBlockApply(t *testing.T) {
 	fx.pidofErr = nil
 	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
 	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
 	if err := eng.Apply(context.Background()); err != nil {
 		t.Fatalf("BusyBox ip rejecting table 4254 must still Apply TCP capture: %v", err)
 	}
@@ -255,6 +350,9 @@ func TestBusyBoxTable4254DoesNotBlockApply(t *testing.T) {
 	}
 	if !planHasSeq(fx.snapshot(), "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("nat BTKN jump missing after BusyBox table skip")
+	}
+	if planHasSeq(fx.snapshot(), "-j", "TPROXY") {
+		t.Fatal("UDP TPROXY must be omitted without full iproute2")
 	}
 	for _, c := range fx.snapshot() {
 		if c.Name == "ip" && hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
@@ -275,13 +373,13 @@ func TestBusyBoxTable4254RemoveIsIdempotent(t *testing.T) {
 func TestAddrtypeMatchUnavailableDoesNotBlockApply(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.busyBoxTable = true
-	fx.addrtypeUnavailable = true
 	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
 	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
 	fx.pidofOut = "25942"
 	fx.pidofErr = nil
 	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
 	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, false)
 	if err := eng.Apply(context.Background()); err != nil {
 		t.Fatalf("iptables addrtype unavailable must still Apply TCP capture: %v", err)
 	}
@@ -294,6 +392,9 @@ func TestAddrtypeMatchUnavailableDoesNotBlockApply(t *testing.T) {
 	}
 	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
 		t.Fatal("TCP REDIRECT 11820 missing after addrtype skip")
+	}
+	if planHasSeq(snap, "addrtype") {
+		t.Fatal("addrtype must be omitted from the KN plan")
 	}
 	if !planHasSeq(snap, "add", SetExcludeV4, "172.16.0.0/12", "-exist") {
 		t.Fatal("RFC1918 exclude missing; addrtype skip must not drop ipset RETURN")
@@ -329,6 +430,7 @@ func TestXKeenIPv6WildcardListenIsLive(t *testing.T) {
 	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
 	fx.busyBoxTable = true
 	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
 	rep, err := eng.Preflight(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -353,6 +455,7 @@ func TestProcNet11820WithExpectedPIDIsOurs(t *testing.T) {
 	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\n"
 	fx.exeByPID = map[int]string{42: OurXrayExecutable}
 	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
 	eng.SetExpectedListener(ExpectedListener{Executable: OurXrayExecutable, PID: 42})
 	if err := eng.Apply(context.Background()); err != nil {
 		t.Fatalf("OUR Xray on 11820 without ss pid must Apply: %v", err)

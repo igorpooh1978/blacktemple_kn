@@ -118,6 +118,9 @@ type PreflightReport struct {
 	XKeenActive bool
 	XKeenState  XKeenPresence
 	IPv6Capture string
+	UDPCapture  string
+	IPRoute2    string
+	Addrtype    bool
 }
 
 // TrafficCaptureEngine is the production capture abstraction (ADR-009).

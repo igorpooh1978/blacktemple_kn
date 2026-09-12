@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/igorpooh1978/blacktemple_kn/src/internal/routing"
 )
@@ -161,6 +162,13 @@ func ExecuteNetfilterReconcile(ctx context.Context, cmd NFCommand) error {
 			pid = 0
 		}
 		setter.SetExpectedListener(routing.ExpectedListener{Executable: cmd.XrayPath, PID: pid})
+	}
+	if p, ok := eng.(interface {
+		SetIPRoute2Configured(string)
+		ProbeCapabilities(context.Context)
+	}); ok {
+		p.SetIPRoute2Configured(strings.TrimSpace(os.Getenv("BTKN_IPROUTE2")))
+		p.ProbeCapabilities(ctx)
 	}
 
 	if err := eng.Reconcile(ctx, desired); err != nil {

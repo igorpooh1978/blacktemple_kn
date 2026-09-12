@@ -42,6 +42,19 @@ func TestRescueCleanupBTKNOnly(t *testing.T) {
 	}
 }
 
+func TestRescueUsesFullIPRoute2(t *testing.T) {
+	s := readRescueScript(t)
+	if !strings.Contains(s, "/opt/libexec/ip-full") {
+		t.Fatal("rescue must name Entware ip-full")
+	}
+	if !strings.Contains(s, "exec -a ip") {
+		t.Fatal("ip-full must be invoked with argv0 ip")
+	}
+	if strings.Contains(s, "lookup 111") || strings.Contains(s, "0x111") {
+		t.Fatal("rescue must not delete XKeen table 111 or mark 0x111")
+	}
+}
+
 func TestRescueNeverTouchesXKeenNamespace(t *testing.T) {
 	s := readRescueScript(t)
 	forbidden := []string{
