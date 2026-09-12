@@ -384,3 +384,87 @@ func TestListProfilesOmitsSecrets(t *testing.T) {
 		t.Fatal("blackKey present")
 	}
 }
+
+type recordingConn struct {
+	last string
+}
+
+func (c *recordingConn) Control(_ context.Context, op string) error {
+	c.last = op
+	return nil
+}
+
+func TestStatusJSONIncludesGeodataLifecycle(t *testing.T) {
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth: svc,
+		Status: snapshotStatus{
+			Connection: "disconnected",
+			Country:    "",
+			Routing:    "smart",
+			ServerMode: "auto",
+			Key:        "missing",
+			Geodata:    "current",
+			Xray:       api.XrayProcess{State: "STOPPED"},
+		},
+		Version: api.VersionInfo{Version: "test"},
+		UI:      fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["geodata"] != "current" {
+		t.Fatalf("geodata %v", body["geodata"])
+	}
+	raw := rec.Body.String()
+	if strings.Contains(strings.ToLower(raw), "blackkey") || strings.Contains(raw, "vless://") {
+		t.Fatalf("status leaked secret: %s", raw)
+	}
+}
+
+func TestConnectionAcceptsRestartVPN(t *testing.T) {
+	conn := &recordingConn{}
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth:       svc,
+		Status:     stubStatus{},
+		Connection: conn,
+		Version:    api.VersionInfo{Version: "test"},
+		UI:         fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/setup", map[string]string{"password": testPassword}, nil, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("setup %d", rec.Code)
+	}
+	login := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": testPassword}, nil, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %d", login.Code)
+	}
+	cookies := login.Result().Cookies()
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/connection", map[string]string{"op": "restart-vpn"}, cookies, "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("restart-vpn %d %s", rec.Code, rec.Body.String())
+	}
+	if conn.last != "restart-vpn" {
+		t.Fatalf("op %q", conn.last)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/api/v1/connection", map[string]string{"op": "reconnect"}, cookies, "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("reconnect %d %s", rec.Code, rec.Body.String())
+	}
+	if conn.last != "reconnect" {
+		t.Fatalf("op %q", conn.last)
+	}
+}

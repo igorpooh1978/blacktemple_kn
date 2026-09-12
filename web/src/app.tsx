@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { ConnectionState, Profile, Status, VersionInfo } from "./api";
+import type { ConnectionOp, ConnectionState, Profile, Status, VersionInfo } from "./api";
 import {
   getAuthState,
   getProfiles,
@@ -236,11 +236,9 @@ export function App() {
     }
   }
 
-  async function onConnect() {
+  async function runConnection(op: ConnectionOp) {
     setError("");
     setNotice("");
-    const connected = status.connection === "connected";
-    const op = connected ? "disconnect" : "connect";
     setBusy(true);
     try {
       const res = await postConnection(op);
@@ -269,6 +267,11 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onConnect() {
+    const connected = status.connection === "connected";
+    await runConnection(connected ? "disconnect" : "connect");
   }
 
   async function onImportKey(ev: Event) {
@@ -454,6 +457,12 @@ export function App() {
         onNewPassword={setNewPassword}
         onNewRepeat={setNewRepeat}
         onChangePassword={onChangePassword}
+        onRestartVpn={() => {
+          void runConnection("restart-vpn");
+        }}
+        onReconnect={() => {
+          void runConnection("reconnect");
+        }}
         onLogout={onLogout}
         onBack={() => {
           setError("");

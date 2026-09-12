@@ -83,6 +83,17 @@ describe("API client", () => {
     expect(JSON.parse(String(init.body))).toEqual({ op: "connect" });
   });
 
+  it("posts restart-vpn with credentials include", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await postConnection("restart-vpn");
+    expect(res.status).toBe(202);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(String(init.body))).toEqual({ op: "restart-vpn" });
+  });
+
   it("posts BlackKey once and does not add extra CSRF headers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -146,6 +157,25 @@ describe("parseStatus", () => {
     });
     expect(empty?.country).toBeUndefined();
     expect(empty?.latencyMs).toBeUndefined();
+  });
+
+  it("accepts geodata enum and drops other strings", () => {
+    expect(
+      parseStatus({
+        connection: "disconnected",
+        routing: "smart",
+        serverMode: "auto",
+        geodata: "current",
+      })?.geodata,
+    ).toBe("current");
+    expect(
+      parseStatus({
+        connection: "disconnected",
+        routing: "smart",
+        serverMode: "auto",
+        geodata: "vless://not-a-state",
+      })?.geodata,
+    ).toBeUndefined();
   });
 });
 

@@ -11,6 +11,7 @@ import {
   connectionActionLabel,
   connectionLabel,
   countryLabel,
+  geodataLabel,
   keyLabel,
   latencyLabel,
   noticeAlertTone,
@@ -100,6 +101,11 @@ describe("Russian labels", () => {
     expect(profileDisplayName({ id: "p1" })).toBe("Ключ");
     expect(profileStatusLabel("active")).toBe("Активный");
     expect(profileStatusLabel("ready")).toBe("Готов");
+    expect(geodataLabel("missing")).toBe("Нет файлов");
+    expect(geodataLabel("current")).toBe("Актуальные");
+    expect(geodataLabel("stale")).toBe("Устарели");
+    expect(geodataLabel("unknown")).toBe("Неизвестно");
+    expect(geodataLabel(undefined)).toBe("—");
   });
 
   it("maps notices to alert tones without exposing secrets", () => {

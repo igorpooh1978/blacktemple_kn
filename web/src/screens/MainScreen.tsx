@@ -1,5 +1,6 @@
 import {
   IconAlertTriangle,
+  IconInfoCircle,
   IconKey,
   IconPower,
   IconRoute,
@@ -14,6 +15,7 @@ import {
   connectionActionLabel,
   connectionLabel,
   countryLabel,
+  geodataLabel,
   keyLabel,
   latencyLabel,
   noticeAlertTone,
@@ -125,6 +127,11 @@ export function MainScreen(props: {
           icon={<IconRoute size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
           title="Маршрутизация"
           value={routingLabel(props.status.routing)}
+        />
+        <SettingRow
+          icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Геоданные"
+          value={geodataLabel(props.status.geodata)}
         />
         <SettingRow
           icon={<IconKey size={ICON_SIZE_SM} stroke={ICON_STROKE} />}

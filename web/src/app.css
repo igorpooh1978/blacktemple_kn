@@ -161,6 +161,22 @@
   margin-bottom: var(--space-4);
 }
 
+.panel .auth-title,
+.panel .lead {
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+}
+
+.panel .auth-form,
+.panel .auth-aux {
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+}
+
+.panel .auth-aux {
+  padding-bottom: var(--space-4);
+}
+
 .key-disclose {
   border-top: 1px solid var(--border);
 }
@@ -214,6 +230,10 @@
 
 .facts-card .setting-row {
   min-height: 52px;
+}
+
+.facts-card {
+  margin-bottom: var(--space-4);
 }
 
 @media (max-width: 360px) {

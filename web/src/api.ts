@@ -10,6 +10,8 @@ export type ServerMode = "auto" | "manual" | "failover" | "rotate";
 
 export type KeyState = "missing" | "active" | "invalid";
 
+export type GeodataState = "missing" | "current" | "stale" | "unknown";
+
 export type XrayState =
   | "STOPPED"
   | "STARTING"
@@ -38,7 +40,7 @@ export type Status = {
   routing: RoutingMode;
   serverMode: ServerMode;
   key?: KeyState;
-  geodata?: string;
+  geodata?: GeodataState;
   errorClass?: ConnectionErrorClass;
   xray?: XrayProcess;
 };
@@ -57,7 +59,11 @@ export type Profile = {
   status?: string;
 };
 
-export type ConnectionOp = "connect" | "disconnect";
+export type ConnectionOp =
+  | "connect"
+  | "disconnect"
+  | "reconnect"
+  | "restart-vpn";
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
@@ -115,6 +121,12 @@ function isKeyState(v: unknown): v is KeyState {
   return v === "missing" || v === "active" || v === "invalid";
 }
 
+function isGeodataState(v: unknown): v is GeodataState {
+  return (
+    v === "missing" || v === "current" || v === "stale" || v === "unknown"
+  );
+}
+
 function isXrayState(v: unknown): v is XrayState {
   return (
     v === "STOPPED" ||
@@ -152,7 +164,7 @@ export function parseStatus(data: unknown): Status | null {
   if (isKeyState(o.key)) {
     status.key = o.key;
   }
-  if (typeof o.geodata === "string") {
+  if (isGeodataState(o.geodata)) {
     status.geodata = o.geodata;
   }
   if (isConnectionErrorClass(o.errorClass)) {

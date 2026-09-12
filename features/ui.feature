@@ -17,3 +17,18 @@ Feature: Control panel main screen
     When the authenticated UI loads MAIN
     Then profile names and statuses are shown
     And blackKey is absent from the list JSON and the DOM
+
+  @BTKN-UI-003 @P0 @ui
+  Scenario: Main and advanced show geodata from status
+    Given GET /api/v1/status includes geodata
+    When the authenticated UI loads MAIN and Advanced
+    Then geodata is shown as Russian lifecycle copy
+    And non-enum geodata values are not rendered
+
+  @BTKN-UI-004 @P0 @ui
+  Scenario: Advanced restart-vpn posts the frozen connection op
+    Given an authenticated UI on Advanced
+    When the user taps Перезапустить VPN
+    Then POST /api/v1/connection has op restart-vpn
+    And the connection LED still comes only from GET /status
+    And restart-manager is not offered in the panel

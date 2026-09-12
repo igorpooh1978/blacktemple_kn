@@ -1,5 +1,6 @@
 import type {
   ConnectionState,
+  GeodataState,
   KeyState,
   Profile,
   RoutingMode,
@@ -127,6 +128,25 @@ export function profileStatusLabel(status: string | undefined): string {
 export function profileDisplayName(profile: Profile): string {
   const name = (profile.name ?? "").trim();
   return name === "" ? "Ключ" : name;
+}
+
+export function geodataLabel(v: GeodataState | undefined): string {
+  switch (v) {
+    case "missing":
+      return "Нет файлов";
+    case "current":
+      return "Актуальные";
+    case "stale":
+      return "Устарели";
+    case "unknown":
+      return "Неизвестно";
+    case undefined:
+      return "—";
+    default: {
+      const _never: never = v;
+      return _never;
+    }
+  }
 }
 
 export function noticeAlertTone(

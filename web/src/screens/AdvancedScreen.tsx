@@ -4,6 +4,7 @@ import {
   IconInfoCircle,
   IconLock,
   IconLogout,
+  IconPower,
   IconRefresh,
 } from "../ui/tabler";
 import type { Status, VersionInfo, XrayState } from "../api";
@@ -16,7 +17,7 @@ import { ICON_SIZE, ICON_SIZE_SM, ICON_STROKE } from "../ui/icons";
 import { SettingRow } from "../ui/SettingRow";
 import { StatusBadge } from "../ui/StatusBadge";
 import type { StatusTone } from "../ui/StatusBadge";
-import { noticeAlertTone } from "../labels";
+import { geodataLabel, noticeAlertTone } from "../labels";
 
 export function AdvancedScreen(props: {
   version: VersionInfo | null;
@@ -31,6 +32,8 @@ export function AdvancedScreen(props: {
   onNewPassword: (value: string) => void;
   onNewRepeat: (value: string) => void;
   onChangePassword: (ev: Event) => void;
+  onRestartVpn: () => void;
+  onReconnect: () => void;
   onLogout: () => void;
   onBack: () => void;
 }) {
@@ -40,6 +43,11 @@ export function AdvancedScreen(props: {
   const restarts =
     xray?.restartCount === undefined ? "—" : String(xray.restartCount);
   const xrayState = xray?.state ?? "—";
+  const xrayVersion = xray?.version ? xray.version : "—";
+  const platform =
+    props.version === null
+      ? "—"
+      : `${props.version.goos} / ${props.version.goarch}`;
 
   return (
     <main class="shell">
@@ -67,6 +75,11 @@ export function AdvancedScreen(props: {
           value={<StatusBadge tone={xrayTone(xray?.state)}>{xrayState}</StatusBadge>}
         />
         <SettingRow
+          icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Ядро Xray"
+          value={xrayVersion}
+        />
+        <SettingRow
           icon={<IconCpu size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
           title="PID"
           value={pid}
@@ -76,6 +89,26 @@ export function AdvancedScreen(props: {
           title="Перезапусков"
           value={restarts}
         />
+        <SettingRow
+          icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Геоданные"
+          value={geodataLabel(props.status.geodata)}
+        />
+        <SettingRow
+          icon={<IconCpu size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Платформа"
+          value={platform}
+        />
+        <SettingRow
+          icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="GOMIPS"
+          value={props.version == null || props.version.gomips === "" ? "—" : props.version.gomips}
+        />
+        <SettingRow
+          icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="CGO"
+          value={props.version == null || props.version.cgo === "" ? "—" : props.version.cgo}
+        />
         {props.status.errorClass ? (
           <SettingRow
             icon={<IconInfoCircle size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
@@ -84,7 +117,33 @@ export function AdvancedScreen(props: {
           />
         ) : null}
       </Card>
-      <Card>
+      <Card class="panel">
+        <h2 class="auth-title">Управление</h2>
+        <p class="lead">Перезапуск только нашего Xray. XKeen и менеджер Keenetic не трогаются.</p>
+        <div class="auth-form">
+          <Button
+            variant="secondary"
+            block
+            disabled={props.busy}
+            loading={props.busy}
+            icon={<IconRefresh size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+            onClick={props.onRestartVpn}
+          >
+            Перезапустить VPN
+          </Button>
+          <Button
+            variant="secondary"
+            block
+            disabled={props.busy}
+            loading={props.busy}
+            icon={<IconPower size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+            onClick={props.onReconnect}
+          >
+            Переподключить
+          </Button>
+        </div>
+      </Card>
+      <Card class="panel">
         <h2 class="auth-title">Пароль панели</h2>
         <p class="lead">Смена пароля входа в BlackTemple KN, не пароля Keenetic.</p>
         <form class="auth-form" onSubmit={props.onChangePassword}>

@@ -839,6 +839,16 @@
       "tests": ["src/internal/api/handler_test.go::TestListProfilesOmitsSecrets"],
       "redProof": "RED: GET /api/v1/profiles unused by MAIN until profile names render; GREEN after list without blackKey"
     },
+    "BTKN-UI-003": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestStatusJSONIncludesGeodataLifecycle"],
+      "redProof": "RED: MAIN/Advanced omitted geodata until Геоданные row; GREEN after enum copy"
+    },
+    "BTKN-UI-004": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestConnectionAcceptsRestartVPN"],
+      "redProof": "RED: Advanced had no restart-vpn POST until Перезапустить VPN; GREEN after frozen op"
+    },
     "BTKN-PROF-008": {
       "priority": "P0",
       "tests": ["src/internal/profiles/persist_test.go::TestHTTPSImportParse"],
