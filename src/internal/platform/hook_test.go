@@ -93,3 +93,64 @@ func TestNDMHookExportsOriginEnv(t *testing.T) {
 		t.Fatal("hook must still exec netfilter-reconcile")
 	}
 }
+
+func TestNDMHookExportsIPRoute2(t *testing.T) {
+	p := filepath.Join("..", "..", "..", "packaging", "keenetic", "netfilter.d", "blacktemple-kn.sh")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, "BTKN_IPROUTE2=/opt/libexec/ip-full") {
+		t.Fatal("hook must export BTKN_IPROUTE2 when ip-full exists")
+	}
+	if !strings.Contains(text, "export BTKN_IPROUTE2") {
+		t.Fatal("hook must export BTKN_IPROUTE2")
+	}
+}
+
+func TestNDMLateHookSortsAfterXKeenProxy(t *testing.T) {
+	late := filepath.Base(NetfilterHookInstalledLate)
+	if late <= "proxy.sh" {
+		t.Fatalf("late hook %q must sort after proxy.sh", late)
+	}
+	p := filepath.Join("..", "..", "..", NetfilterHookSourceLate)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.HasPrefix(text, "#!/bin/sh") {
+		t.Fatal("expected POSIX sh shebang")
+	}
+	if !strings.Contains(text, NetfilterHookInstalledLate) {
+		t.Fatal("late hook must document installed path")
+	}
+	if !strings.Contains(text, DefaultManagerPath) {
+		t.Fatal("late hook must use fixed manager path")
+	}
+	if !strings.Contains(text, NetfilterReconcileArg) {
+		t.Fatal("late hook must exec netfilter-reconcile")
+	}
+	if strings.Contains(text, "iptables") || strings.Contains(text, "ip6tables") || strings.Contains(text, "nft ") {
+		t.Fatal("late hook must not run firewall commands")
+	}
+	if strings.Contains(text, "S05xkeen") || strings.Contains(text, "/opt/etc/xkeen") {
+		t.Fatal("must not invoke XKeen")
+	}
+	if !strings.Contains(text, "BTKN_IPROUTE2=/opt/libexec/ip-full") {
+		t.Fatal("late hook must export BTKN_IPROUTE2 when ip-full exists")
+	}
+}
+
+func TestNDMLateHookStagedInBuild(t *testing.T) {
+	p := filepath.Join("..", "..", "..", "build.ps1")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, "zz-blacktemple-kn.sh") {
+		t.Fatal("build.ps1 must stage zz-blacktemple-kn.sh")
+	}
+}

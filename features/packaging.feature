@@ -19,6 +19,7 @@ Feature: Packaging
   Scenario: IPK stages the NDM netfilter hook
     Given build.ps1 and packaging/keenetic
     Then the hook is copied to /opt/etc/ndm/netfilter.d/blacktemple-kn.sh
+    And a late hook is copied to /opt/etc/ndm/netfilter.d/zz-blacktemple-kn.sh
 
   @BTKN-PKG-004 @P0 @packaging
   Scenario: Entware opkg accepts gzip-tar IPK

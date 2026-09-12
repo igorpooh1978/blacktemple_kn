@@ -46,3 +46,19 @@ Feature: R6-I UDP TPROXY via full iproute2
     When hybrid Plan is built
     Then mangle TPROXY redirects UDP to 11820 with mark 0x42544b4e
     And hardware LIVE evidence is recorded separately
+
+  @BTKN-R6I-UDP-007 @P0 @routing
+  Scenario: Foreign mangle rewrite does not leave UDP capture detached
+    Given NAT BTKN TCP REDIRECT still present
+    And mangle PREROUTING has been rewritten to xkeen-only
+    When Reconcile desired true runs
+    Then mangle BTKN_PRE is inserted at PREROUTING head
+    And UDP TPROXY 11820 with mark 0x42544b4e is installed
+    And XKeen mark 0x111 is not deleted
+
+  @BTKN-R6I-UDP-008 @P0 @lifecycle
+  Scenario: NDM hook re-applies after XKeen proxy.sh
+    Given packaging/keenetic/netfilter.d
+    Then zz-blacktemple-kn.sh sorts after proxy.sh
+    And the primary hook exports BTKN_IPROUTE2 when ip-full exists
+    And neither hook runs iptables directly

@@ -1030,6 +1030,59 @@ func TestReconcileNDMPartialLeftovers(t *testing.T) {
 	})
 }
 
+func TestReconcileRestoresMangleAfterForeignXKeenRewrite(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N BTKN_PRE\n-N BTKN_TCP\n-A PREROUTING -j BTKN_PRE\n-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.ipRule = "9:\tfrom all fwmark 0x111 lookup 111\n"
+	fx.pidofOut = "20972"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:*"
+	eng := newTestEngine(t, fx)
+	if err := eng.Reconcile(context.Background(), true); err != nil {
+		t.Fatalf("Reconcile after mangle wipe: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("must reinsert mangle BTKN_PRE at PREROUTING head")
+	}
+	if !callsHaveSeq(after, "-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", "11820", "--tproxy-mark", tproxyMarkSpec()) {
+		t.Fatal("must reinstall UDP TPROXY 11820")
+	}
+	for _, c := range after {
+		if isProbe(c.Name, c.Args) {
+			continue
+		}
+		if hasTokenArgs(c, "0x111") && (hasTokenArgs(c, "del") || hasTokenArgs(c, "delete") || hasTokenArgs(c, "-D") || hasTokenArgs(c, "-X") || hasTokenArgs(c, "-F")) {
+			t.Fatalf("must not delete XKeen mark 0x111: %s", argvLine(c))
+		}
+		if hasTokenArgs(c, "xkeen") {
+			t.Fatalf("must not mutate XKeen: %s", argvLine(c))
+		}
+	}
+}
+
+func TestApplyContinuesWhenChainExists(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.rejectExistingChain = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.pidofOut = "20972"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:*"
+	eng := newTestEngine(t, fx)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply must treat existing BTKN chains as idempotent: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("idempotent Apply must still insert nat PREROUTING jump")
+	}
+	if !callsHaveSeq(after, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("idempotent Apply must still insert mangle PREROUTING jump")
+	}
+}
+
 func TestForeignCollisionNoAutopick(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.tableOut = "local default dev lo table 4254 scope host"

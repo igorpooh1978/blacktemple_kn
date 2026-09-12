@@ -20,6 +20,9 @@ const (
 	// proxy.sh there). Ours is a distinct filename.
 	NetfilterHookInstalled = "/opt/etc/ndm/netfilter.d/blacktemple-kn.sh"
 	NetfilterHookSource    = "packaging/keenetic/netfilter.d/blacktemple-kn.sh"
+	// NetfilterHookInstalledLate runs after XKeen proxy.sh (lexical).
+	NetfilterHookInstalledLate = "/opt/etc/ndm/netfilter.d/zz-blacktemple-kn.sh"
+	NetfilterHookSourceLate    = "packaging/keenetic/netfilter.d/zz-blacktemple-kn.sh"
 
 	// ChainPrefix is the only iptables prefix we may name. D owns Apply/Remove.
 	ChainPrefix = "BTKN_"

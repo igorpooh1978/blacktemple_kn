@@ -42,6 +42,7 @@ type fakeExecutor struct {
 	busyBoxTable        bool
 	pathIPBusyBox       bool
 	addrtypeUnavailable bool
+	rejectExistingChain bool
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -88,6 +89,9 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 
 	if !isProbe(name, args) {
 		f.mutCount++
+		if f.rejectExistingChain && name == "iptables" && hasToken(args, "-N") {
+			return "iptables: Chain already exists.\n", errors.New("exit status 1")
+		}
 		if f.failDetach && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
 			return "", errors.New("fake detach jump failed")
 		}
@@ -176,6 +180,18 @@ func (f *fakeExecutor) applySuccess(name string, args []string) {
 	if hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
 		f.natS = stripJump(f.natS, ChainPRE)
 		f.mangleS = stripJump(f.mangleS, ChainPRE)
+	}
+	if name == "iptables" && hasSeq(args, "PREROUTING", "-j", ChainPRE) && (hasToken(args, "-I") || hasToken(args, "-A")) {
+		line := "-A PREROUTING -j " + ChainPRE + "\n"
+		if hasSeq(args, "-t", "mangle") {
+			if !jumpPresent(f.mangleS, "PREROUTING", ChainPRE) {
+				f.mangleS = line + f.mangleS
+			}
+		} else if hasSeq(args, "-t", "nat") {
+			if !jumpPresent(f.natS, "PREROUTING", ChainPRE) {
+				f.natS = line + f.natS
+			}
+		}
 	}
 	if isIPBin(name) && hasToken(args, "del") && hasToken(args, "fwmark") {
 		f.ipRule = ""

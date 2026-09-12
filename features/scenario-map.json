@@ -543,7 +543,10 @@
     },
     "BTKN-PKG-003": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestBuildStagesNDMHook"],
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestBuildStagesNDMHook",
+        "src/internal/platform/hook_test.go::TestNDMLateHookStagedInBuild"
+      ],
       "redProof": "RED: TestBuildStagesNDMHook FAIL before build.ps1 copies the hook; GREEN after"
     },
     "BTKN-PKG-004": {
@@ -1182,6 +1185,22 @@
       "priority": "P0",
       "tests": ["src/internal/routing/hybrid_test.go::TestUDPTProxyPlanReachesCapturePort"],
       "redProof": "RED: TestUDPTProxyPlanReachesCapturePort FAIL until TPROXY 11820 mark 0x42544b4e is in the plan"
+    },
+    "BTKN-R6I-UDP-007": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestReconcileRestoresMangleAfterForeignXKeenRewrite",
+        "src/internal/routing/hybrid_test.go::TestApplyContinuesWhenChainExists"
+      ],
+      "redProof": "RED: TestReconcileRestoresMangleAfterForeignXKeenRewrite FAIL until Reconcile reinserts mangle BTKN_PRE and TPROXY 11820 after xkeen-only mangle rewrite"
+    },
+    "BTKN-R6I-UDP-008": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/hook_test.go::TestNDMLateHookSortsAfterXKeenProxy",
+        "src/internal/platform/hook_test.go::TestNDMHookExportsIPRoute2"
+      ],
+      "redProof": "RED: TestNDMLateHookSortsAfterXKeenProxy FAIL until zz-blacktemple-kn.sh exists and sorts after proxy.sh"
     }
   }
 }

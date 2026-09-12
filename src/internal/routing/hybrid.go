@@ -189,13 +189,23 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	}
 
 	for _, c := range e.installCommands() {
-		_, err := e.exec.Run(ctx, c.Name, c.Args...)
+		out, err := e.exec.Run(ctx, c.Name, c.Args...)
 		if err != nil {
+			if isExistingObjectFailure(out, err) {
+				continue
+			}
 			if rbErr := e.Remove(ctx); rbErr != nil {
 				return errors.Join(err, rbErr)
 			}
 			return err
 		}
+	}
+
+	if err := e.ensureMangleJump(ctx); err != nil {
+		if rbErr := e.Remove(ctx); rbErr != nil {
+			return errors.Join(err, rbErr)
+		}
+		return err
 	}
 
 	e.mu.Lock()
@@ -257,6 +267,21 @@ func (e *HybridIptablesEngine) Reconcile(ctx context.Context, desired bool) erro
 // FailOpen uninstalls BTKN hooks so the selected client returns DIRECT.
 func (e *HybridIptablesEngine) FailOpen(ctx context.Context) error {
 	return e.Remove(ctx)
+}
+
+func (e *HybridIptablesEngine) ensureMangleJump(ctx context.Context) error {
+	if !e.usePolicyRouting() {
+		return nil
+	}
+	mangleS, err := e.exec.Run(ctx, "iptables", "-t", "mangle", "-S")
+	if err != nil {
+		return err
+	}
+	if jumpPresent(mangleS, "PREROUTING", ChainPRE) {
+		return nil
+	}
+	_, err = e.exec.Run(ctx, "iptables", "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE)
+	return err
 }
 
 func (e *HybridIptablesEngine) verifyRemoved(ctx context.Context) error {
@@ -361,6 +386,24 @@ func isAbsentObjectFailure(output string, err error) bool {
 		"no such file",
 		"fib table does not exist",
 		"no such process",
+	} {
+		if strings.Contains(msg, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// isExistingObjectFailure reports idempotent create of an owned object.
+func isExistingObjectFailure(output string, err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(output + "\n" + err.Error()))
+	for _, tok := range []string{
+		"chain already exists",
+		"file exists",
+		"rtnetlink answers: file exists",
 	} {
 		if strings.Contains(msg, tok) {
 			return true
