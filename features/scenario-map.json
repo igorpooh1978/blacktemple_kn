@@ -1030,6 +1030,11 @@
       "tests": ["src/internal/connection/resolved_test.go::TestRestartRestoresResolvedWithoutProvider"],
       "redProof": "RED: TestRestartRestoresResolvedWithoutProvider FAIL until resolved keys persist with LKG"
     },
+    "BTKN-CONN-016": {
+      "priority": "P0",
+      "tests": ["src/internal/connection/service_test.go::TestStatusLatencyFromProbeAndClearsOnDisconnect"],
+      "redProof": "RED: TestStatusLatencyFromProbeAndClearsOnDisconnect FAIL while Status always leaves latencyMs null after Check"
+    },
     "BTKN-XRAY-018": {
       "priority": "P0",
       "tests": ["src/internal/xray/resolved_ws_test.go::TestResolvedVLESSWSTLSSocksOnly"],

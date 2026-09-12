@@ -51,10 +51,12 @@ type Service struct {
 	configPath string
 	probe      TunnelProbe
 
-	mu        sync.Mutex
-	lastErr   string
-	lastClass string
-	lkgStage  string
+	mu            sync.Mutex
+	lastErr       string
+	lastClass     string
+	lkgStage      string
+	lastLatencyMs int
+	hasLatency    bool
 }
 
 func New(cfg Config) *Service {
@@ -136,6 +138,7 @@ func (s *Service) Control(ctx context.Context, op string) error {
 }
 
 func (s *Service) connectLocked(ctx context.Context) error {
+	s.hasLatency = false
 	profileID := s.profiles.ActiveID()
 	if profileID == "" {
 		return ErrNoProfile
@@ -213,11 +216,18 @@ func (s *Service) connectLocked(ctx context.Context) error {
 				last = err
 				continue
 			}
+			probeAt := time.Now()
 			if err := s.probe.Check(ctx, s.listenHost, s.listenPort); err != nil {
 				_ = s.sup.Stop(ctx)
 				last = err
 				continue
 			}
+			ms := int(time.Since(probeAt).Milliseconds())
+			if ms < 0 {
+				ms = 0
+			}
+			s.lastLatencyMs = ms
+			s.hasLatency = true
 			s.lkgStage = lkgNetworkVerified
 		}
 		_, _ = s.profiles.SelectCandidate(profileID, pair.key.ID, pair.srv.ID)
@@ -231,6 +241,7 @@ func (s *Service) connectLocked(ctx context.Context) error {
 }
 
 func (s *Service) disconnectLocked(ctx context.Context) error {
+	s.hasLatency = false
 	if err := s.sup.Stop(ctx); err != nil {
 		return err
 	}
@@ -464,6 +475,8 @@ func (s *Service) Status() api.Status {
 	s.mu.Lock()
 	lastErr := s.lastErr
 	lastClass := s.lastClass
+	lat := s.lastLatencyMs
+	hasLat := s.hasLatency
 	s.mu.Unlock()
 
 	st := api.Status{
@@ -507,6 +520,10 @@ func (s *Service) Status() api.Status {
 				}
 			}
 		}
+	}
+	if st.Connection == "connected" && hasLat {
+		v := lat
+		st.LatencyMs = &v
 	}
 	return st
 }
