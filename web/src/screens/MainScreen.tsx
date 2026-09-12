@@ -9,14 +9,19 @@ import {
   IconShieldOff,
 } from "../ui/tabler";
 import { useEffect, useRef } from "preact/hooks";
-import type { ConnectionState, Status } from "../api";
+import type { ConnectionState, Profile, Status } from "../api";
 import {
   connectionActionLabel,
   connectionLabel,
+  countryLabel,
   keyLabel,
+  latencyLabel,
   noticeAlertTone,
+  profileDisplayName,
+  profileStatusLabel,
   routingLabel,
   serverLabel,
+  statusSummary,
 } from "../labels";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -30,6 +35,7 @@ import { Spinner } from "../ui/Spinner";
 export function MainScreen(props: {
   connection: ConnectionState;
   status: Status;
+  profiles: Profile[];
   busy: boolean;
   error: string;
   notice: string;
@@ -78,7 +84,7 @@ export function MainScreen(props: {
         <h2 class="hero-title" aria-live="polite">
           {connectionLabel(props.connection)}
         </h2>
-        <p class="hero-sub">{serverLabel(props.status.serverMode)}</p>
+        <p class="hero-sub">{statusSummary(props.status)}</p>
         <div class="hero-action">
           <Button
             variant={connected ? "secondary" : "primary"}
@@ -106,6 +112,16 @@ export function MainScreen(props: {
           value={serverLabel(props.status.serverMode)}
         />
         <SettingRow
+          icon={<IconServer size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Страна"
+          value={countryLabel(props.status.country)}
+        />
+        <SettingRow
+          icon={<IconRoute size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          title="Задержка"
+          value={latencyLabel(props.status.latencyMs)}
+        />
+        <SettingRow
           icon={<IconRoute size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
           title="Маршрутизация"
           value={routingLabel(props.status.routing)}
@@ -116,6 +132,15 @@ export function MainScreen(props: {
           value={keyLabel(props.status.key)}
           trailing={keyReady ? "check" : "none"}
         />
+        {props.profiles.map((profile) => (
+          <SettingRow
+            key={profile.id}
+            icon={<IconKey size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+            title={profileDisplayName(profile)}
+            value={profileStatusLabel(profile.status)}
+            trailing={profile.status === "active" ? "check" : "none"}
+          />
+        ))}
         <details ref={keyForm} class="key-disclose">
           <summary>
             <IconKey size={ICON_SIZE_SM} stroke={ICON_STROKE} aria-hidden="true" />

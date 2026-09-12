@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getAuthState,
+  getProfiles,
   parseAuthState,
+  parseProfiles,
   parseStatus,
   postConnection,
   postLogin,
@@ -126,6 +128,25 @@ describe("parseStatus", () => {
       errorClass: "publicKey=abcde",
     })?.errorClass).toBeUndefined();
   });
+
+  it("keeps country and latencyMs without inventing them", () => {
+    const parsed = parseStatus({
+      connection: "connected",
+      routing: "smart",
+      serverMode: "auto",
+      country: "DE",
+      latencyMs: 42,
+    });
+    expect(parsed?.country).toBe("DE");
+    expect(parsed?.latencyMs).toBe(42);
+    const empty = parseStatus({
+      connection: "disconnected",
+      routing: "smart",
+      serverMode: "auto",
+    });
+    expect(empty?.country).toBeUndefined();
+    expect(empty?.latencyMs).toBeUndefined();
+  });
 });
 
 describe("auth state", () => {
@@ -149,5 +170,32 @@ describe("auth state", () => {
       authenticated: false,
     });
     expect(parseAuthState({ initialized: true })).toBeNull();
+  });
+});
+
+describe("profiles", () => {
+  it("GETs /api/v1/profiles with credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ id: "p1", name: "lab", status: "active" }]), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await getProfiles();
+    expect(res.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/profiles");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("parses redacted profile fields and drops blackKey", () => {
+    const parsed = parseProfiles([
+      { id: "p1", name: "lab", status: "active", blackKey: "bk_secret" },
+    ]);
+    expect(parsed).toEqual([{ id: "p1", name: "lab", status: "active" }]);
+    expect(JSON.stringify(parsed)).not.toContain("blackKey");
+    expect(JSON.stringify(parsed)).not.toContain("bk_secret");
+    expect(parseProfiles({})).toBeNull();
+    expect(parseProfiles([{ name: "lab" }])).toBeNull();
   });
 });

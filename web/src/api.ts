@@ -51,6 +51,12 @@ export type VersionInfo = {
   cgo: string;
 };
 
+export type Profile = {
+  id: string;
+  name?: string;
+  status?: string;
+};
+
 export type ConnectionOp = "connect" | "disconnect";
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -172,6 +178,31 @@ export function parseStatus(data: unknown): Status | null {
   return status;
 }
 
+export function parseProfiles(data: unknown): Profile[] | null {
+  if (!Array.isArray(data)) {
+    return null;
+  }
+  const out: Profile[] = [];
+  for (const item of data) {
+    if (item === null || typeof item !== "object") {
+      return null;
+    }
+    const o = item as Record<string, unknown>;
+    if (typeof o.id !== "string" || o.id === "") {
+      return null;
+    }
+    const profile: Profile = { id: o.id };
+    if (typeof o.name === "string") {
+      profile.name = o.name;
+    }
+    if (typeof o.status === "string") {
+      profile.status = o.status;
+    }
+    out.push(profile);
+  }
+  return out;
+}
+
 export function parseVersion(data: unknown): VersionInfo | null {
   if (data === null || typeof data !== "object") {
     return null;
@@ -223,6 +254,10 @@ export function parseAuthState(data: unknown): {
 
 export function getVersion(): Promise<Response> {
   return apiFetch("/api/v1/version");
+}
+
+export function getProfiles(): Promise<Response> {
+  return apiFetch("/api/v1/profiles");
 }
 
 export function postSetup(password: string): Promise<Response> {

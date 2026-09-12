@@ -829,6 +829,16 @@
       "tests": ["src/internal/api/handler_test.go::TestLogout"],
       "redProof": "RED: TestLogout FAIL until POST /api/v1/auth/logout clears the session; UI Выйти maps to LOGIN"
     },
+    "BTKN-UI-001": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestStatusJSONIncludesCountryAndLatency"],
+      "redProof": "RED: MAIN omitted country/latencyMs until SettingRow Страна/Задержка; GREEN after status fields are rendered"
+    },
+    "BTKN-UI-002": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestListProfilesOmitsSecrets"],
+      "redProof": "RED: GET /api/v1/profiles unused by MAIN until profile names render; GREEN after list without blackKey"
+    },
     "BTKN-PROF-008": {
       "priority": "P0",
       "tests": ["src/internal/profiles/persist_test.go::TestHTTPSImportParse"],

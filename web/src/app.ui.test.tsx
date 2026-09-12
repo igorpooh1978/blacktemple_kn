@@ -11,6 +11,8 @@ type StatusBody = {
   connection: "disconnected" | "connecting" | "connected" | "failed";
   routing: "smart" | "all" | "selected";
   serverMode: "auto" | "manual" | "failover" | "rotate";
+  country?: string;
+  latencyMs?: number | null;
   key?: "missing" | "active" | "invalid";
   xray?: { state?: string; pid?: number | null; restartCount?: number };
 };
@@ -51,6 +53,8 @@ function stubApi(opts: {
   logoutStatus?: number;
   connectionStatus?: number;
   profileStatus?: number;
+  profiles?: unknown;
+  profilesStatus?: number;
   version?: {
     version: string;
     goos: string;
@@ -97,6 +101,13 @@ function stubApi(opts: {
     }
     if (url.includes("/api/v1/connection") && method === "POST") {
       return jsonRes(opts.connectionStatus ?? 202);
+    }
+    if (url.includes("/api/v1/profiles") && method === "GET") {
+      const code = opts.profilesStatus ?? 200;
+      if (code !== 200) {
+        return jsonRes(code);
+      }
+      return jsonRes(200, opts.profiles ?? []);
     }
     if (url.includes("/api/v1/profiles") && method === "POST") {
       return jsonRes(opts.profileStatus ?? 201);
@@ -238,6 +249,59 @@ describe("main connection hero", () => {
     expect(root.textContent).toContain("VPN отключён");
     expect(root.textContent).not.toContain("VPN подключён");
     expect(findButton("Подключить").disabled).toBe(false);
+  });
+});
+
+describe("status facts and profiles", () => {
+  it("shows country and latency from GET /status", async () => {
+    stubApi({
+      statusBody: {
+        ...disconnectedStatus(),
+        connection: "connected",
+        key: "active",
+        country: "DE",
+        latencyMs: 42,
+      },
+    });
+    mount();
+    await see("VPN подключён");
+    await see("Страна");
+    await see("DE");
+    await see("Задержка");
+    await see("42 мс");
+    expect(root.textContent).not.toContain("Германия");
+    expect(root.textContent).toContain("Автоматически · DE · 42 мс");
+  });
+
+  it("shows an em dash when country and latencyMs are absent", async () => {
+    stubApi({ statusBody: disconnectedStatus() });
+    mount();
+    await see("Страна");
+    await see("Задержка");
+    expect(root.textContent).toContain("—");
+    expect(root.textContent).not.toContain(" мс");
+  });
+
+  it("lists redacted profile names and never renders blackKey", async () => {
+    stubApi({
+      statusBody: { ...disconnectedStatus(), key: "active" },
+      profiles: [
+        {
+          id: "p1",
+          name: "lab",
+          status: "active",
+          blackKey: SECRET,
+        },
+        { id: "p2", name: "home", status: "ready" },
+      ],
+    });
+    mount();
+    await see("lab");
+    await see("Активный");
+    await see("home");
+    await see("Готов");
+    expect(root.innerHTML).not.toContain(SECRET);
+    expect(root.textContent).not.toContain("blackKey");
   });
 });
 
