@@ -1201,6 +1201,14 @@
         "src/internal/platform/hook_test.go::TestNDMHookExportsIPRoute2"
       ],
       "redProof": "RED: TestNDMLateHookSortsAfterXKeenProxy FAIL until zz-blacktemple-kn.sh exists and sorts after proxy.sh"
+    },
+    "BTKN-R6I-UDP-009": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestTProxyRepliesToRFC1918UseMainTable",
+        "src/internal/routing/hybrid_test.go::TestOwnedMarkRulePresentIncludesLANReply"
+      ],
+      "redProof": "RED: TestTProxyRepliesToRFC1918UseMainTable FAIL until Plan sends marked RFC1918 replies to lookup main pref 4253"
     }
   }
 }

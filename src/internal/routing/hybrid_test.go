@@ -172,6 +172,56 @@ func TestUDPTProxyPlanReachesCapturePort(t *testing.T) {
 	}
 }
 
+func TestTProxyRepliesToRFC1918UseMainTable(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main", "pref", "4253") {
+		t.Fatal("marked RFC1918 replies must lookup main, not table 4254 local lo")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "10.0.0.0/8", "lookup", "main", "pref", "4253") {
+		t.Fatal("10/8 reply path missing")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "192.168.0.0/16", "lookup", "main", "pref", "4253") {
+		t.Fatal("192.168/16 reply path missing")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254") {
+		t.Fatal("internet divert table 4254 missing")
+	}
+	lanIdx := planSeqIndex(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main")
+	tblIdx := planSeqIndex(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254")
+	if lanIdx < 0 || tblIdx < 0 || lanIdx > tblIdx {
+		t.Fatal("LAN reply rules must be planned before table 4254 lookup")
+	}
+	if planHasSeq(p.Install, "0x111") || planHasSeq(p.Uninstall, "0x111") {
+		t.Fatal("must not mention XKeen mark 0x111")
+	}
+	if !planHasSeq(p.Uninstall, "-4", "rule", "del", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main", "pref", "4253") {
+		t.Fatal("Remove must delete LAN reply rules")
+	}
+	for _, c := range append(append([]Argv{}, p.Install...), p.Uninstall...) {
+		if touchesOUTPUT(c) {
+			t.Fatalf("OUTPUT capture forbidden: %s", argvLine(c))
+		}
+		if hasJump(c, ChainOUT) {
+			t.Fatalf("BTKN_OUT must not be jumped to: %s", argvLine(c))
+		}
+	}
+}
+
+func TestOwnedMarkRulePresentIncludesLANReply(t *testing.T) {
+	line := "4253:\tfrom all fwmark 0x42544b4e to 172.16.0.0/12 lookup main"
+	if !ownedMarkRulePresent(line) {
+		t.Fatal("leftover marked LAN reply rule must fail cleanup verification")
+	}
+	if ownedMarkRulePresent("99:\tfrom all fwmark 0x111 lookup 111") {
+		t.Fatal("XKeen mark must not look like a BTKN leftover")
+	}
+}
+
 func TestFullIPRoute2InstallsTable4254(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
@@ -227,7 +277,7 @@ func TestMissingFullIPRoute2FailsUDPExplicitly(t *testing.T) {
 		t.Fatalf("TCP Apply: %v", err)
 	}
 	snap := fx.snapshot()
-	if planHasSeq(snap, "-j", "TPROXY") || planHasSeq(snap, "lookup", "4254") {
+	if planHasSeq(snap, "-j", "TPROXY") || planHasSeq(snap, "lookup", "4254") || planHasSeq(snap, "lookup", "main") {
 		t.Fatal("must not install half-working UDP TPROXY without full iproute2")
 	}
 	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
@@ -1167,12 +1217,16 @@ func ipsetAdds(cmds []Argv, set string) []string {
 }
 
 func planHasSeq(cmds []Argv, seq ...string) bool {
-	for _, c := range cmds {
+	return planSeqIndex(cmds, seq...) >= 0
+}
+
+func planSeqIndex(cmds []Argv, seq ...string) int {
+	for i, c := range cmds {
 		if hasSeq(c.Args, seq...) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func planHasToken(cmds []Argv, tok string) bool {

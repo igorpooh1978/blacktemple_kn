@@ -114,6 +114,16 @@ func (e *HybridIptablesEngine) installCommands() []Argv {
 			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-xmark", mark),
 			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-m", "mark", "!", "--mark", "0x0", "-j", "CONNMARK", "--save-mark", "--nfmask", "0xffffffff", "--ctmask", "0xffffffff"),
 			iptables("-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", port, "--tproxy-mark", mark),
+		)
+		// TPROXY sets fwmark on the skb. Xray IP_TRANSPARENT replies to the
+		// LAN client keep that mark. Without a more-specific rule they hit
+		// table 4254 local default lo and never reach br0 (CASE D: access
+		// log YES, iPhone srflx NO). SOCKS UDP to 127.0.0.1 is unaffected.
+		lanPref := strconv.Itoa(LANReplyRulePreference)
+		for _, p := range IPv4DirectPrefixes() {
+			cmds = append(cmds, ipcmd(ip, "-4", "rule", "add", "fwmark", mark, "to", p.String(), "lookup", "main", "pref", lanPref))
+		}
+		cmds = append(cmds,
 			ipcmd(ip, "-4", "rule", "add", "fwmark", mark, "lookup", table, "pref", pref),
 			ipcmd(ip, "-4", "route", "add", "local", "default", "dev", "lo", "table", table),
 			iptables("-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE),
@@ -130,9 +140,10 @@ func (e *HybridIptablesEngine) removeCommands() []Argv {
 	mark := tproxyMarkSpec()
 	table := strconv.Itoa(RouteTable)
 	ip := e.ipBin()
+	lanPref := strconv.Itoa(LANReplyRulePreference)
 
 	// Detach our jumps first. Never flush PREROUTING or foreign chains.
-	return []Argv{
+	cmds := []Argv{
 		iptables("-t", "nat", "-D", "PREROUTING", "-j", ChainPRE),
 		iptables("-t", "mangle", "-D", "PREROUTING", "-j", ChainPRE),
 		iptables("-t", "nat", "-F", ChainTCP),
@@ -147,9 +158,15 @@ func (e *HybridIptablesEngine) removeCommands() []Argv {
 		iptables("-t", "mangle", "-X", ChainUDP),
 		iptables("-t", "mangle", "-X", ChainPRE),
 		iptables("-t", "mangle", "-X", ChainOUT),
+	}
+	for _, p := range IPv4DirectPrefixes() {
+		cmds = append(cmds, ipcmd(ip, "-4", "rule", "del", "fwmark", mark, "to", p.String(), "lookup", "main", "pref", lanPref))
+	}
+	cmds = append(cmds,
 		ipcmd(ip, "-4", "rule", "del", "fwmark", mark, "lookup", table),
 		ipcmd(ip, "-4", "route", "del", "local", "default", "dev", "lo", "table", table),
 		ipset("destroy", SetClientsV4),
 		ipset("destroy", SetExcludeV4),
-	}
+	)
+	return cmds
 }

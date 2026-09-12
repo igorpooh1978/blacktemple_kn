@@ -25,6 +25,10 @@ const (
 	RouteTable     = 4254
 	TProxyAddress  = "127.0.0.1"
 	RulePreference = 4254
+	// LANReplyRulePreference is higher priority than RulePreference.
+	// Marked TPROXY replies to RFC1918 must use main (LAN iface), not
+	// table 4254 local default lo.
+	LANReplyRulePreference = 4253
 
 	IPv6CaptureUnverified = "UNVERIFIED"
 )

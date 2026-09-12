@@ -62,3 +62,14 @@ Feature: R6-I UDP TPROXY via full iproute2
     Then zz-blacktemple-kn.sh sorts after proxy.sh
     And the primary hook exports BTKN_IPROUTE2 when ip-full exists
     And neither hook runs iptables directly
+
+  @BTKN-R6I-UDP-009 @P0 @routing
+  Scenario: TPROXY replies to RFC1918 stay in main table
+    Given full iproute2 and policy routing
+    And table 4254 is local default lo
+    When hybrid Plan is built
+    Then fwmark 0x42544b4e to RFC1918 lookup main pref 4253 is installed
+    And fwmark 0x42544b4e lookup 4254 remains
+    And Remove deletes the RFC1918 reply rules
+    And XKeen mark 0x111 is not deleted
+    And BTKN_OUT is not attached

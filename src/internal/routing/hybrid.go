@@ -21,7 +21,9 @@ var _ TrafficCaptureEngine = (*HybridIptablesEngine)(nil)
 //
 // Anti-recapture: R6 is PREROUTING-only. Locally generated Xray outbound is an
 // OUTPUT-path flow and is never jumped into BTKN_OUT. BTKN_OUT is created as
-// a reserved empty chain and is not attached.
+// a reserved empty chain and is not attached. Marked TPROXY replies to
+// RFC1918 use ip rule pref 4253 lookup main so they are not blackholed by
+// table 4254 local default lo.
 //
 // IPv6 capture is UNVERIFIED and is not enabled.
 type HybridIptablesEngine struct {
@@ -322,8 +324,7 @@ func jumpPresent(tableS, chain, jump string) bool {
 }
 
 func ownedMarkRulePresent(rules string) bool {
-	lower := strings.ToLower(rules)
-	return strings.Contains(lower, "0x42544b4e") && strings.Contains(rules, "4254")
+	return strings.Contains(strings.ToLower(rules), "0x42544b4e")
 }
 
 func tableStillPresent(out string, err error) bool {
