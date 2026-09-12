@@ -25,12 +25,13 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 	if err != nil {
 		return PreflightReport{}, fmt.Errorf("%w: iptables mangle -S: %v", ErrPreflightProbe, err)
 	}
-	rules, err := e.exec.Run(ctx, "ip", "-4", "rule", "show")
+	ip := e.ipBin()
+	rules, err := e.exec.Run(ctx, ip, "-4", "rule", "show")
 	if err != nil {
 		return PreflightReport{}, fmt.Errorf("%w: ip rule show: %v", ErrPreflightProbe, err)
 	}
 
-	tableOut, tableErr := e.exec.Run(ctx, "ip", "-4", "route", "show", "table", strconv.Itoa(RouteTable))
+	tableOut, tableErr := e.exec.Run(ctx, ip, "-4", "route", "show", "table", strconv.Itoa(RouteTable))
 	if tableErr != nil && !isTableAbsent(tableOut, tableErr) {
 		return PreflightReport{}, fmt.Errorf("%w: ip route show table %d: %v", ErrPreflightProbe, RouteTable, tableErr)
 	}
@@ -79,13 +80,25 @@ func (e *HybridIptablesEngine) Preflight(ctx context.Context) (PreflightReport, 
 
 	xkeen := ClassifyXKeen(natS, mangleS, listenOut, pidofOut, rules, pidofErr == nil)
 	report.XKeenState = xkeen
-	if xkeen == XKeenLive || xkeen == XKeenResidual {
+	if xkeen == XKeenLive {
+		report.XKeenActive = true
+	}
+	if xkeen == XKeenResidual {
 		report.XKeenActive = true
 		report.Collisions = append(report.Collisions, Collision{
 			Kind:   CollisionXKeen,
 			Detail: "xkeen capture engine detected " + string(xkeen),
 		})
 	}
+
+	if e.usePolicyRouting() {
+		report.UDPCapture = UDPCaptureSupported
+		report.IPRoute2 = e.ipBin()
+	} else {
+		report.UDPCapture = UDPCaptureUnsupported
+		report.IPRoute2 = ClassIPRoute2FullRequired
+	}
+	report.Addrtype = e.useAddrtype()
 
 	if len(report.Collisions) > 0 {
 		report.OK = false
@@ -98,15 +111,28 @@ func (e *HybridIptablesEngine) probeListenText(ctx context.Context) (string, err
 	if ssErr == nil {
 		return ssOut, nil
 	}
-	tcpOut, tcpErr := e.exec.Run(ctx, "cat", "/proc/net/tcp")
-	if tcpErr != nil {
-		return "", tcpErr
+	var b strings.Builder
+	var lastErr error
+	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6"} {
+		out, err := e.exec.Run(ctx, "cat", path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		b.WriteString(out)
+		b.WriteByte('\n')
 	}
-	udpOut, udpErr := e.exec.Run(ctx, "cat", "/proc/net/udp")
-	if udpErr != nil {
-		return "", udpErr
+	text := b.String()
+	if strings.TrimSpace(text) == "" {
+		if ssErr != nil {
+			return "", ssErr
+		}
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", fmt.Errorf("%w: listen probes empty", ErrPreflightProbe)
 	}
-	return tcpOut + "\n" + udpOut, nil
+	return text, nil
 }
 
 func (e *HybridIptablesEngine) probePortOwners(ctx context.Context, listenOut string, port int) ([]string, error) {
@@ -241,6 +267,11 @@ func portOccupiedForeign(listenOut string, owners []string, port int, expected E
 		exe = OurXrayExecutable
 	}
 	if len(owners) == 0 {
+		// /proc/net has no pid= field. If OUR Xray is the expected
+		// listener and is alive, 11820 belongs to the capture engine.
+		if expected.PID > 0 {
+			return false
+		}
 		return true
 	}
 	for _, o := range owners {

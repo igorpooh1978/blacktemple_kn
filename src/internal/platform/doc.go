@@ -5,6 +5,7 @@ package platform
 //
 // NDM hook source: packaging/keenetic/netfilter.d/blacktemple-kn.sh
 // Installed: /opt/etc/ndm/netfilter.d/blacktemple-kn.sh
+// Late hook (after XKeen proxy.sh): /opt/etc/ndm/netfilter.d/zz-blacktemple-kn.sh
 // CLI argv for stream A: blacktempled netfilter-reconcile [stop]
 //
 // FAIL OPEN: capture.enabled defaults to false. Reconcile returns

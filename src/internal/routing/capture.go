@@ -25,12 +25,17 @@ const (
 	RouteTable     = 4254
 	TProxyAddress  = "127.0.0.1"
 	RulePreference = 4254
+	// LANReplyRulePreference is higher priority than RulePreference.
+	// Marked TPROXY replies to RFC1918 must use main (LAN iface), not
+	// table 4254 local default lo.
+	LANReplyRulePreference = 4253
 
 	IPv6CaptureUnverified = "UNVERIFIED"
 )
 
 // XKeenPresence is the live vs leftover XKeen classification. Apply is refused
-// for LIVE and RESIDUAL_CAPTURE. BlackTemple never deletes XKeen objects.
+// for RESIDUAL_CAPTURE. Live XKeen in its own namespace is coexistence.
+// BlackTemple never deletes XKeen objects.
 type XKeenPresence string
 
 const (
@@ -109,14 +114,17 @@ type Collision struct {
 }
 
 // PreflightReport is a read-only capability/collision check.
-// Plan/DryRun/Preflight must still succeed as calls when XKeen is present;
-// Apply is what returns ErrExistingCaptureEngine.
+// Plan/DryRun/Preflight must still succeed as calls when XKeen is present.
+// Apply returns ErrExistingCaptureEngine for residual XKeen capture only.
 type PreflightReport struct {
 	OK          bool
 	Collisions  []Collision
 	XKeenActive bool
 	XKeenState  XKeenPresence
 	IPv6Capture string
+	UDPCapture  string
+	IPRoute2    string
+	Addrtype    bool
 }
 
 // TrafficCaptureEngine is the production capture abstraction (ADR-009).

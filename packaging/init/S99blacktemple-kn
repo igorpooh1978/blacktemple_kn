@@ -16,6 +16,13 @@ PIDFILE=$PREFIX/run/blacktempled.pid
 LOGFILE=$PREFIX/logs/blacktempled.log
 PATH=$PREFIX/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# Explicit full iproute2 for BTKN table 4254. Do not rely on PATH "ip"
+# (BusyBox until ip-full replaces the Entware symlink).
+if [ -x /opt/libexec/ip-full ]; then
+	BTKN_IPROUTE2=/opt/libexec/ip-full
+	export BTKN_IPROUTE2
+fi
+
 mkdir -p "$PREFIX/run" "$PREFIX/logs" "$PREFIX/data" 2>/dev/null || true
 
 # Network-ready wait (condition loop with backoff, not a single delay).

@@ -205,6 +205,7 @@ foreach ($name in $targetNames) {
     $ndmDstDir = Join-Path $stage "opt\etc\ndm\netfilter.d"
     New-Item -ItemType Directory -Force -Path $ndmDstDir | Out-Null
     Copy-Item "$Root\packaging\keenetic\netfilter.d\blacktemple-kn.sh" "$ndmDstDir\blacktemple-kn.sh"
+    Copy-Item "$Root\packaging\keenetic\netfilter.d\zz-blacktemple-kn.sh" "$ndmDstDir\zz-blacktemple-kn.sh"
 
     if ($IncludeXray) {
         $xrayDst = Join-Path $opt "bin\xray"
@@ -232,7 +233,7 @@ foreach ($name in $targetNames) {
     $ctrl = [regex]::Replace($ctrl, "(?m)^Architecture: .*", "Architecture: $ipkArch")
     Write-UnixText $controlFile $ctrl
 
-    $chmod = "opt/blacktemple-kn/bin/blacktempled=0755,opt/etc/init.d/S99blacktemple-kn=0755,opt/etc/ndm/netfilter.d/blacktemple-kn.sh=0755"
+    $chmod = "opt/blacktemple-kn/bin/blacktempled=0755,opt/etc/init.d/S99blacktemple-kn=0755,opt/etc/ndm/netfilter.d/blacktemple-kn.sh=0755,opt/etc/ndm/netfilter.d/zz-blacktemple-kn.sh=0755"
     if ($IncludeXray) {
         $chmod += ",opt/blacktemple-kn/bin/xray=0755"
     }

@@ -18,4 +18,8 @@ BIN=/opt/blacktemple-kn/bin/blacktempled
 [ -x "$BIN" ] || exit 0
 BTKN_NDM_HOOK=1
 export BTKN_NDM_HOOK
+if [ -x /opt/libexec/ip-full ]; then
+	BTKN_IPROUTE2=/opt/libexec/ip-full
+	export BTKN_IPROUTE2
+fi
 exec "$BIN" netfilter-reconcile

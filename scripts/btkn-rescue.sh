@@ -36,6 +36,44 @@ have() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+# Full iproute2 for table 4254. BusyBox ip rejects high table IDs.
+# /opt/libexec/ip-full must be invoked with argv0 "ip".
+iproute2() {
+	if [ -n "$BTKN_IPROUTE2" ] && [ -x "$BTKN_IPROUTE2" ]; then
+		case "$BTKN_IPROUTE2" in
+			*/ip-full)
+				if have busybox; then
+					busybox sh -c 'exec -a ip "$0" "$@"' "$BTKN_IPROUTE2" "$@"
+					return $?
+				fi
+				;;
+			*)
+				"$BTKN_IPROUTE2" "$@"
+				return $?
+				;;
+		esac
+	fi
+	if [ -x /opt/sbin/ip ]; then
+		_rl=$(readlink -f /opt/sbin/ip 2>/dev/null || echo)
+		case "$_rl" in
+			*busybox*) ;;
+			*)
+				/opt/sbin/ip "$@"
+				return $?
+				;;
+		esac
+	fi
+	if [ -x /opt/libexec/ip-full ] && have busybox; then
+		busybox sh -c 'exec -a ip /opt/libexec/ip-full "$@"' _ "$@"
+		return $?
+	fi
+	if have ip; then
+		ip "$@"
+		return $?
+	fi
+	return 0
+}
+
 listen_port() {
 	_kind=$1
 	_port=$2
@@ -161,10 +199,10 @@ cmd_recover() {
 	flush_owned_chain mangle BTKN_UDP
 	flush_owned_chain mangle BTKN_PRE
 	flush_owned_chain mangle BTKN_OUT
-	if have ip; then
-		ip -4 rule del fwmark "$MARK/0xffffffff" lookup "$TABLE" 2>/dev/null || true
-		ip -4 rule del fwmark "$MARK" lookup "$TABLE" 2>/dev/null || true
-		ip -4 route del local default dev lo table "$TABLE" 2>/dev/null || true
+	if have ip || [ -x /opt/libexec/ip-full ] || [ -x /opt/sbin/ip ]; then
+		iproute2 -4 rule del fwmark "$MARK/0xffffffff" lookup "$TABLE" 2>/dev/null || true
+		iproute2 -4 rule del fwmark "$MARK" lookup "$TABLE" 2>/dev/null || true
+		iproute2 -4 route del local default dev lo table "$TABLE" 2>/dev/null || true
 	fi
 	if have ipset; then
 		ipset destroy btkn_clients_v4 2>/dev/null || true

@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -26,16 +27,22 @@ type fakeExecutor struct {
 	ssErr     error
 	tcpOut    string
 	udpOut    string
+	tcp6Out   string
+	udp6Out   string
 	pidofOut  string
 	pidofErr  error
 	exeByPID  map[int]string
 
-	failAtMut      int
-	mutCount       int
-	failErr        error
-	failDetach     bool
-	failPermission bool
-	ipsetPresent   bool
+	failAtMut           int
+	mutCount            int
+	failErr             error
+	failDetach          bool
+	failPermission      bool
+	ipsetPresent        bool
+	busyBoxTable        bool
+	pathIPBusyBox       bool
+	addrtypeUnavailable bool
+	rejectExistingChain bool
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -56,8 +63,35 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call)
 
+	if isIPBin(name) && hasToken(args, "-V") {
+		if name == IPRoute2FullBinary || strings.HasSuffix(name, "/ip-full") {
+			return "ip utility, iproute2-ss4.4.0-11-entware\n", nil
+		}
+		if f.busyBoxTable || f.pathIPBusyBox {
+			return "BusyBox v1.37.0 (fake) multi-call binary.\n", errors.New("exit status 1")
+		}
+		return "ip utility, iproute2-ss4.4.0-11-entware\n", nil
+	}
+
+	if f.busyBoxTable && isIPBin(name) && name != IPRoute2FullBinary && !strings.HasSuffix(name, "/ip-full") && hasToken(args, strconv.Itoa(RouteTable)) {
+		msg := "ip: invalid argument '" + strconv.Itoa(RouteTable) + "' to 'table'\n"
+		if isProbe(name, args) {
+			return msg, errors.New("exit status 1")
+		}
+		f.mutCount++
+		return msg, errors.New("exit status 1")
+	}
+
+	if f.addrtypeUnavailable && name == "iptables" && hasToken(args, "addrtype") {
+		f.mutCount++
+		return "iptables: No chain/target/match by that name.\n", errors.New("exit status 1")
+	}
+
 	if !isProbe(name, args) {
 		f.mutCount++
+		if f.rejectExistingChain && name == "iptables" && hasToken(args, "-N") {
+			return "iptables: Chain already exists.\n", errors.New("exit status 1")
+		}
 		if f.failDetach && hasSeq(args, "-D", "PREROUTING", "-j", ChainPRE) {
 			return "", errors.New("fake detach jump failed")
 		}
@@ -83,9 +117,9 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 		return f.natS, f.natErr
 	case name == "iptables" && hasSeq(args, "-t", "mangle", "-S"):
 		return f.mangleS, f.mangleErr
-	case name == "ip" && hasSeq(args, "-4", "rule", "show"):
+	case isIPBin(name) && hasSeq(args, "-4", "rule", "show"):
 		return f.ipRule, f.ruleErr
-	case name == "ip" && hasSeq(args, "-4", "route", "show", "table"):
+	case isIPBin(name) && hasSeq(args, "-4", "route", "show", "table"):
 		return f.tableOut, f.tableErr
 	case name == "ss":
 		return f.ssOut, f.ssErr
@@ -99,6 +133,10 @@ func (f *fakeExecutor) Run(ctx context.Context, name string, args ...string) (st
 			return f.udpOut, nil
 		}
 		return f.ssOut, nil
+	case name == "cat" && hasToken(args, "/proc/net/tcp6"):
+		return f.tcp6Out, nil
+	case name == "cat" && hasToken(args, "/proc/net/udp6"):
+		return f.udp6Out, nil
 	case name == "cat":
 		return f.ssOut, nil
 	case name == "readlink":
@@ -143,10 +181,22 @@ func (f *fakeExecutor) applySuccess(name string, args []string) {
 		f.natS = stripJump(f.natS, ChainPRE)
 		f.mangleS = stripJump(f.mangleS, ChainPRE)
 	}
-	if name == "ip" && hasToken(args, "del") && hasToken(args, "fwmark") {
+	if name == "iptables" && hasSeq(args, "PREROUTING", "-j", ChainPRE) && (hasToken(args, "-I") || hasToken(args, "-A")) {
+		line := "-A PREROUTING -j " + ChainPRE + "\n"
+		if hasSeq(args, "-t", "mangle") {
+			if !jumpPresent(f.mangleS, "PREROUTING", ChainPRE) {
+				f.mangleS = line + f.mangleS
+			}
+		} else if hasSeq(args, "-t", "nat") {
+			if !jumpPresent(f.natS, "PREROUTING", ChainPRE) {
+				f.natS = line + f.natS
+			}
+		}
+	}
+	if isIPBin(name) && hasToken(args, "del") && hasToken(args, "fwmark") {
 		f.ipRule = ""
 	}
-	if name == "ip" && hasToken(args, "del") && hasToken(args, "table") {
+	if isIPBin(name) && hasToken(args, "del") && hasToken(args, "table") {
 		f.tableOut = ""
 		f.tableErr = errors.New("Error: ipv4: FIB table does not exist.")
 	}
@@ -164,6 +214,13 @@ func (f *fakeExecutor) applySuccess(name string, args []string) {
 	if name == "ipset" && hasToken(args, "destroy") {
 		f.ipsetPresent = false
 	}
+}
+
+func isIPBin(name string) bool {
+	if name == "ip" || name == IPRoute2FullBinary {
+		return true
+	}
+	return strings.HasSuffix(name, "/ip") || strings.HasSuffix(name, "/ip-full")
 }
 
 func isUninstallCmd(name string, args []string) bool {
@@ -196,10 +253,10 @@ func (f *fakeExecutor) uninstallTargetPresent(name string, args []string) bool {
 		}
 		return false
 	}
-	if name == "ip" && hasToken(args, "rule") {
+	if isIPBin(name) && hasToken(args, "rule") {
 		return ownedMarkRulePresent(f.ipRule)
 	}
-	if name == "ip" && hasToken(args, "route") {
+	if isIPBin(name) && hasToken(args, "route") {
 		return tableStillPresent(f.tableOut, f.tableErr)
 	}
 	if name == "ipset" {
@@ -247,7 +304,7 @@ func isProbe(name string, args []string) bool {
 	if name == "iptables" && hasToken(args, "-S") {
 		return true
 	}
-	if name == "ip" && hasToken(args, "show") {
+	if isIPBin(name) && (hasToken(args, "show") || hasToken(args, "-V")) {
 		return true
 	}
 	return false

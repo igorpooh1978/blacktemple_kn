@@ -168,8 +168,8 @@
     },
     "BTKN-ROUT-012": {
       "priority": "P0",
-      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenCollision"],
-      "redProof": "RED_PROOF_NOT_AVAILABLE: mapped existing GREEN acceptance on 03e9fea"
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL until live XKeen is coexistence not a blocking collision"
     },
     "BTKN-ROUT-013": {
       "priority": "P0",
@@ -543,7 +543,10 @@
     },
     "BTKN-PKG-003": {
       "priority": "P0",
-      "tests": ["docs/hardware/probesafety_test.go::TestBuildStagesNDMHook"],
+      "tests": [
+        "docs/hardware/probesafety_test.go::TestBuildStagesNDMHook",
+        "src/internal/platform/hook_test.go::TestNDMLateHookStagedInBuild"
+      ],
       "redProof": "RED: TestBuildStagesNDMHook FAIL before build.ps1 copies the hook; GREEN after"
     },
     "BTKN-PKG-004": {
@@ -1087,6 +1090,125 @@
       "priority": "P0",
       "tests": ["src/internal/profiles/signed_sub_ssrf_test.go::TestMissingHMACPreservesLKG"],
       "redProof": "RED: TestMissingHMACPreservesLKG FAIL until missing secret is fail-closed without wiping LKG"
+    },
+    "BTKN-R6I-LIVE-001": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestPREROUTINGInsertedAtHead",
+        "src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"
+      ],
+      "redProof": "RED: TestPREROUTINGInsertedAtHead FAIL until BTKN jump is iptables -I PREROUTING 1"
+    },
+    "BTKN-R6I-LIVE-002": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestSelectedClientOnly"],
+      "redProof": "RED: TestSelectedClientOnly FAIL until non-selected sources RETURN from BTKN_PRE"
+    },
+    "BTKN-R6I-LIVE-003": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXrayOutboundNotRecaptured"],
+      "redProof": "RED: TestXrayOutboundNotRecaptured FAIL if OUTPUT or BTKN_OUT is attached"
+    },
+    "BTKN-R6I-LIVE-004": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL if Apply deletes xkeen/0x111/1181"
+    },
+    "BTKN-R6I-LIVE-005": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestDisabledRemoveOwnedNeverTouchesXKeen"],
+      "redProof": "RED: TestDisabledRemoveOwnedNeverTouchesXKeen FAIL until Remove is BTKN-only"
+    },
+    "BTKN-R6I-LIVE-006": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestPartialApplyRollback"],
+      "redProof": "RED: TestPartialApplyRollback FAIL until partial Apply calls Remove"
+    },
+    "BTKN-R6I-LIVE-007": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestDisabledRemoveOwnedNeverTouchesXKeen",
+        "src/internal/xray/transparent_test.go::TestStartTransparentRejectsXKeenPort",
+        "src/internal/platform/ourxray_test.go::TestForeignXrayIsNeverOurs"
+      ],
+      "redProof": "RED: OUR Xray stop/start must refuse port 1181 and never name /opt/sbin/xray as ours"
+    },
+    "BTKN-R6I-LIVE-008": {
+      "priority": "P0",
+      "tests": ["src/internal/platform/capturecfg_test.go::TestSetCaptureEnabledRoundTrip"],
+      "redProof": "RED: TestSetCaptureEnabledRoundTrip FAIL until capture.enabled can be persisted false after true"
+    },
+    "BTKN-R6I-LIVE-009": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254DoesNotBlockApply",
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254RemoveIsIdempotent",
+        "src/internal/routing/hybrid_test.go::TestBusyBoxTable4254IsNotPreflightCollision",
+        "src/internal/routing/hybrid_test.go::TestXKeenIPv6WildcardListenIsLive",
+        "src/internal/routing/hybrid_test.go::TestProcNet11820WithExpectedPIDIsOurs"
+      ],
+      "redProof": "RED: TestBusyBoxTable4254DoesNotBlockApply FAIL until BusyBox invalid argument 4254 is skipped and TCP Apply succeeds"
+    },
+    "BTKN-R6I-LIVE-010": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestAddrtypeMatchUnavailableDoesNotBlockApply"
+      ],
+      "redProof": "RED: TestAddrtypeMatchUnavailableDoesNotBlockApply FAIL until addrtype no chain/target/match is skipped and TCP Apply succeeds"
+    },
+    "BTKN-R6I-UDP-001": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/iproute2_test.go::TestResolveIPRoute2PrefersFullOverBusyBox"],
+      "redProof": "RED: TestResolveIPRoute2PrefersFullOverBusyBox FAIL until /opt/libexec/ip-full wins over BusyBox PATH ip"
+    },
+    "BTKN-R6I-UDP-002": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestFullIPRoute2InstallsTable4254"],
+      "redProof": "RED: TestFullIPRoute2InstallsTable4254 FAIL until Apply uses full iproute2 for fwmark 4254"
+    },
+    "BTKN-R6I-UDP-003": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestMissingFullIPRoute2FailsUDPExplicitly"],
+      "redProof": "RED: TestMissingFullIPRoute2FailsUDPExplicitly FAIL until BusyBox omits TPROXY and reports IPROUTE2_FULL_REQUIRED"
+    },
+    "BTKN-R6I-UDP-004": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestMissingAddrtypeUsesExcludeFallback"],
+      "redProof": "RED: TestMissingAddrtypeUsesExcludeFallback FAIL until Plan omits addrtype and keeps RFC1918 exclude"
+    },
+    "BTKN-R6I-UDP-005": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestXKeenLiveAllowsApplyWithoutMutatingXKeen"],
+      "redProof": "RED: TestXKeenLiveAllowsApplyWithoutMutatingXKeen FAIL if Apply deletes 0x111 or table 111"
+    },
+    "BTKN-R6I-UDP-006": {
+      "priority": "P0",
+      "tests": ["src/internal/routing/hybrid_test.go::TestUDPTProxyPlanReachesCapturePort"],
+      "redProof": "RED: TestUDPTProxyPlanReachesCapturePort FAIL until TPROXY 11820 mark 0x42544b4e is in the plan"
+    },
+    "BTKN-R6I-UDP-007": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestReconcileRestoresMangleAfterForeignXKeenRewrite",
+        "src/internal/routing/hybrid_test.go::TestApplyContinuesWhenChainExists"
+      ],
+      "redProof": "RED: TestReconcileRestoresMangleAfterForeignXKeenRewrite FAIL until Reconcile reinserts mangle BTKN_PRE and TPROXY 11820 after xkeen-only mangle rewrite"
+    },
+    "BTKN-R6I-UDP-008": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/platform/hook_test.go::TestNDMLateHookSortsAfterXKeenProxy",
+        "src/internal/platform/hook_test.go::TestNDMHookExportsIPRoute2"
+      ],
+      "redProof": "RED: TestNDMLateHookSortsAfterXKeenProxy FAIL until zz-blacktemple-kn.sh exists and sorts after proxy.sh"
+    },
+    "BTKN-R6I-UDP-009": {
+      "priority": "P0",
+      "tests": [
+        "src/internal/routing/hybrid_test.go::TestTProxyRepliesToRFC1918UseMainTable",
+        "src/internal/routing/hybrid_test.go::TestOwnedMarkRulePresentIncludesLANReply"
+      ],
+      "redProof": "RED: TestTProxyRepliesToRFC1918UseMainTable FAIL until Plan sends marked RFC1918 replies to lookup main pref 4253"
     }
   }
 }

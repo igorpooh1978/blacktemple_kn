@@ -11,4 +11,5 @@ package keenetic
 //
 // NDM netfilter.d is evidenced (XKeen proxy.sh lives there). Our hook is
 // packaging/keenetic/netfilter.d/blacktemple-kn.sh →
-// /opt/etc/ndm/netfilter.d/blacktemple-kn.sh. Do not name or generate proxy.sh.
+// /opt/etc/ndm/netfilter.d/blacktemple-kn.sh, plus zz-blacktemple-kn.sh after
+// XKeen proxy.sh. Do not name or generate proxy.sh.

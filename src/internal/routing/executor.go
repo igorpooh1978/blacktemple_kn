@@ -15,6 +15,7 @@ func (CommandExecutor) Run(ctx context.Context, name string, args ...string) (st
 		return "", ErrNilExecutor
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Args[0] = argv0For(name)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

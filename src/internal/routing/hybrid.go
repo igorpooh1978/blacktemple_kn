@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -20,16 +21,23 @@ var _ TrafficCaptureEngine = (*HybridIptablesEngine)(nil)
 //
 // Anti-recapture: R6 is PREROUTING-only. Locally generated Xray outbound is an
 // OUTPUT-path flow and is never jumped into BTKN_OUT. BTKN_OUT is created as
-// a reserved empty chain and is not attached.
+// a reserved empty chain and is not attached. Marked TPROXY replies to
+// RFC1918 use ip rule pref 4253 lookup main so they are not blackholed by
+// table 4254 local default lo.
 //
 // IPv6 capture is UNVERIFIED and is not enabled.
 type HybridIptablesEngine struct {
-	mu       sync.Mutex
-	client   netip.Addr
-	exec     Executor
-	guard    KeeneticPolicyGuard
-	applied  bool
-	expected ExpectedListener
+	mu            sync.Mutex
+	client        netip.Addr
+	exec          Executor
+	guard         KeeneticPolicyGuard
+	applied       bool
+	expected      ExpectedListener
+	ipPath        string
+	ipConfigured  string
+	policyRouting bool
+	addrtype      bool
+	capsKnown     bool
 }
 
 // NewHybridIptablesEngine builds an IPv4 hybrid engine. exec must be non-nil.
@@ -63,6 +71,62 @@ func (e *HybridIptablesEngine) SetExpectedListener(l ExpectedListener) {
 	e.expected = l
 }
 
+// SetRoutingCaps records probed or test-injected routing capabilities.
+// Plan/Apply then omit unsupported addrtype and UDP policy-routing argv.
+func (e *HybridIptablesEngine) SetRoutingCaps(ipPath string, policyRouting, addrtype bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ipPath = ipPath
+	e.policyRouting = policyRouting
+	e.addrtype = addrtype
+	e.capsKnown = true
+}
+
+// SetIPRoute2Configured sets the explicit production path (init env / package).
+func (e *HybridIptablesEngine) SetIPRoute2Configured(path string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ipConfigured = path
+}
+
+const capAddrtypeChain = "BTKN_CAP_AT"
+
+// ProbeCapabilities resolves full iproute2 and addrtype without relying on PATH.
+func (e *HybridIptablesEngine) ProbeCapabilities(ctx context.Context) {
+	e.mu.Lock()
+	configured := e.ipConfigured
+	exec := e.exec
+	e.mu.Unlock()
+	path, ok := ResolveIPRoute2(ctx, exec, configured)
+	addr := probeAddrtype(ctx, exec)
+	e.mu.Lock()
+	e.ipPath = path
+	e.policyRouting = ok
+	e.addrtype = addr
+	e.capsKnown = true
+	e.mu.Unlock()
+}
+
+func probeAddrtype(ctx context.Context, exec Executor) bool {
+	if exec == nil {
+		return false
+	}
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+	if _, err := exec.Run(ctx, "iptables", "-t", "nat", "-N", capAddrtypeChain); err != nil {
+		_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+		_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+		return false
+	}
+	_, err := exec.Run(ctx, "iptables", "-t", "nat", "-A", capAddrtypeChain, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "RETURN")
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-F", capAddrtypeChain)
+	_, _ = exec.Run(ctx, "iptables", "-t", "nat", "-X", capAddrtypeChain)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
 func (e *HybridIptablesEngine) validateClient() error {
 	if !e.client.IsValid() || !e.client.Is4() || e.client.IsUnspecified() {
 		return ErrClientRequired
@@ -87,9 +151,10 @@ func (e *HybridIptablesEngine) DryRun() (CapturePlan, error) {
 	return e.Plan()
 }
 
-// Apply installs BTKN hooks. Empty client, collisions, and an active XKeen
-// capture fail. Idempotent if this instance already applied. Partial failure
-// rolls back via Remove.
+// Apply installs BTKN hooks. Empty client and BTKN-namespace collisions fail.
+// Live XKeen (1181 / mark 0x111 / table 111) is coexistence and does not block.
+// Residual XKeen capture returns ErrExistingCaptureEngine. Idempotent if this
+// instance already applied. Partial failure rolls back via Remove.
 func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	if err := e.validateClient(); err != nil {
 		return err
@@ -107,11 +172,18 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 		return nil
 	}
 
+	e.mu.Lock()
+	known := e.capsKnown
+	e.mu.Unlock()
+	if !known {
+		e.ProbeCapabilities(ctx)
+	}
+
 	report, err := e.Preflight(ctx)
 	if err != nil {
 		return err
 	}
-	if report.XKeenActive {
+	if report.XKeenState == XKeenResidual {
 		return ErrExistingCaptureEngine
 	}
 	if !report.OK {
@@ -119,12 +191,23 @@ func (e *HybridIptablesEngine) Apply(ctx context.Context) error {
 	}
 
 	for _, c := range e.installCommands() {
-		if _, err := e.exec.Run(ctx, c.Name, c.Args...); err != nil {
+		out, err := e.exec.Run(ctx, c.Name, c.Args...)
+		if err != nil {
+			if isExistingObjectFailure(out, err) {
+				continue
+			}
 			if rbErr := e.Remove(ctx); rbErr != nil {
 				return errors.Join(err, rbErr)
 			}
 			return err
 		}
+	}
+
+	if err := e.ensureMangleJump(ctx); err != nil {
+		if rbErr := e.Remove(ctx); rbErr != nil {
+			return errors.Join(err, rbErr)
+		}
+		return err
 	}
 
 	e.mu.Lock()
@@ -188,6 +271,21 @@ func (e *HybridIptablesEngine) FailOpen(ctx context.Context) error {
 	return e.Remove(ctx)
 }
 
+func (e *HybridIptablesEngine) ensureMangleJump(ctx context.Context) error {
+	if !e.usePolicyRouting() {
+		return nil
+	}
+	mangleS, err := e.exec.Run(ctx, "iptables", "-t", "mangle", "-S")
+	if err != nil {
+		return err
+	}
+	if jumpPresent(mangleS, "PREROUTING", ChainPRE) {
+		return nil
+	}
+	_, err = e.exec.Run(ctx, "iptables", "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE)
+	return err
+}
+
 func (e *HybridIptablesEngine) verifyRemoved(ctx context.Context) error {
 	natS, err := e.exec.Run(ctx, "iptables", "-t", "nat", "-S")
 	if err != nil {
@@ -197,11 +295,12 @@ func (e *HybridIptablesEngine) verifyRemoved(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: verify mangle -S: %v", ErrCleanupIncomplete, err)
 	}
-	rules, err := e.exec.Run(ctx, "ip", "-4", "rule", "show")
+	ip := e.ipBin()
+	rules, err := e.exec.Run(ctx, ip, "-4", "rule", "show")
 	if err != nil {
 		return fmt.Errorf("%w: verify ip rule: %v", ErrCleanupIncomplete, err)
 	}
-	tableOut, tableErr := e.exec.Run(ctx, "ip", "-4", "route", "show", "table", fmt.Sprintf("%d", RouteTable))
+	tableOut, tableErr := e.exec.Run(ctx, ip, "-4", "route", "show", "table", fmt.Sprintf("%d", RouteTable))
 	if jumpPresent(natS, "PREROUTING", ChainPRE) || jumpPresent(mangleS, "PREROUTING", ChainPRE) {
 		return fmt.Errorf("%w: PREROUTING still jumps to %s", ErrCleanupIncomplete, ChainPRE)
 	}
@@ -225,8 +324,7 @@ func jumpPresent(tableS, chain, jump string) bool {
 }
 
 func ownedMarkRulePresent(rules string) bool {
-	lower := strings.ToLower(rules)
-	return strings.Contains(lower, "0x42544b4e") && strings.Contains(rules, "4254")
+	return strings.Contains(strings.ToLower(rules), "0x42544b4e")
 }
 
 func tableStillPresent(out string, err error) bool {
@@ -244,6 +342,9 @@ func isTableAbsent(out string, err error) bool {
 	if err != nil {
 		msg = strings.ToLower(err.Error() + " " + msg)
 	}
+	if isBusyBoxHighTableID(msg) {
+		return true
+	}
 	for _, tok := range []string{
 		"does not exist",
 		"no such file",
@@ -259,6 +360,11 @@ func isTableAbsent(out string, err error) bool {
 	return false
 }
 
+func isBusyBoxHighTableID(msg string) bool {
+	table := strconv.Itoa(RouteTable)
+	return strings.Contains(msg, "invalid argument") && strings.Contains(msg, table)
+}
+
 // isAbsentObjectFailure reports idempotent absence of an owned object.
 // CommandExecutor returns CombinedOutput in output and often only
 // "exit status 1" in err, so both must be inspected. A bare exit status
@@ -268,6 +374,9 @@ func isAbsentObjectFailure(output string, err error) bool {
 		return false
 	}
 	msg := strings.ToLower(strings.TrimSpace(output + "\n" + err.Error()))
+	if isBusyBoxHighTableID(msg) {
+		return true
+	}
 	for _, tok := range []string{
 		"bad rule",
 		"no chain/target/match",
@@ -278,6 +387,24 @@ func isAbsentObjectFailure(output string, err error) bool {
 		"no such file",
 		"fib table does not exist",
 		"no such process",
+	} {
+		if strings.Contains(msg, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// isExistingObjectFailure reports idempotent create of an owned object.
+func isExistingObjectFailure(output string, err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(output + "\n" + err.Error()))
+	for _, tok := range []string{
+		"chain already exists",
+		"file exists",
+		"rtnetlink answers: file exists",
 	} {
 		if strings.Contains(msg, tok) {
 			return true

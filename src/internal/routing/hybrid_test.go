@@ -23,6 +23,7 @@ func newTestEngine(t *testing.T, fx *fakeExecutor) *HybridIptablesEngine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	eng.SetRoutingCaps("ip", true, true)
 	return eng
 }
 
@@ -122,7 +123,7 @@ func TestTCPRedirectPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
 		t.Fatal("TCP REDIRECT to 11820 missing")
 	}
-	if !planHasSeq(p.Install, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !planHasSeq(p.Install, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("nat PREROUTING jump missing")
 	}
 	if planHasSeq(p.Install, "-t", "mangle", "-j", "REDIRECT") {
@@ -151,11 +152,154 @@ func TestUDPTProxyPlan(t *testing.T) {
 	if !planHasSeq(p.Install, "-4", "route", "add", "local", "default", "dev", "lo", "table", "4254") {
 		t.Fatal("table 4254 local lo missing")
 	}
-	if !planHasSeq(p.Install, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !planHasSeq(p.Install, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("mangle PREROUTING jump missing")
 	}
 	if err := assertUDPOrder(p.Install); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUDPTProxyPlanReachesCapturePort(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", "127.0.0.1", "--on-port", "11820", "--tproxy-mark", "0x42544b4e/0xffffffff") {
+		t.Fatal("UDP TPROXY to 11820 missing")
+	}
+}
+
+func TestTProxyRepliesToRFC1918UseMainTable(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main", "pref", "4253") {
+		t.Fatal("marked RFC1918 replies must lookup main, not table 4254 local lo")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "10.0.0.0/8", "lookup", "main", "pref", "4253") {
+		t.Fatal("10/8 reply path missing")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "192.168.0.0/16", "lookup", "main", "pref", "4253") {
+		t.Fatal("192.168/16 reply path missing")
+	}
+	if !planHasSeq(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254") {
+		t.Fatal("internet divert table 4254 missing")
+	}
+	lanIdx := planSeqIndex(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main")
+	tblIdx := planSeqIndex(p.Install, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254")
+	if lanIdx < 0 || tblIdx < 0 || lanIdx > tblIdx {
+		t.Fatal("LAN reply rules must be planned before table 4254 lookup")
+	}
+	if planHasSeq(p.Install, "0x111") || planHasSeq(p.Uninstall, "0x111") {
+		t.Fatal("must not mention XKeen mark 0x111")
+	}
+	if !planHasSeq(p.Uninstall, "-4", "rule", "del", "fwmark", "0x42544b4e/0xffffffff", "to", "172.16.0.0/12", "lookup", "main", "pref", "4253") {
+		t.Fatal("Remove must delete LAN reply rules")
+	}
+	for _, c := range append(append([]Argv{}, p.Install...), p.Uninstall...) {
+		if touchesOUTPUT(c) {
+			t.Fatalf("OUTPUT capture forbidden: %s", argvLine(c))
+		}
+		if hasJump(c, ChainOUT) {
+			t.Fatalf("BTKN_OUT must not be jumped to: %s", argvLine(c))
+		}
+	}
+}
+
+func TestOwnedMarkRulePresentIncludesLANReply(t *testing.T) {
+	line := "4253:\tfrom all fwmark 0x42544b4e to 172.16.0.0/12 lookup main"
+	if !ownedMarkRulePresent(line) {
+		t.Fatal("leftover marked LAN reply rule must fail cleanup verification")
+	}
+	if ownedMarkRulePresent("99:\tfrom all fwmark 0x111 lookup 111") {
+		t.Fatal("XKeen mark must not look like a BTKN leftover")
+	}
+}
+
+func TestFullIPRoute2InstallsTable4254(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps(IPRoute2FullBinary, true, true)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	snap := fx.snapshot()
+	if !planHasSeq(snap, "-4", "rule", "add", "fwmark", "0x42544b4e/0xffffffff", "lookup", "4254") {
+		t.Fatal("fwmark lookup 4254 missing")
+	}
+	if !planHasSeq(snap, "-4", "route", "add", "local", "default", "dev", "lo", "table", "4254") {
+		t.Fatal("table 4254 local default missing")
+	}
+	found := false
+	for _, c := range snap {
+		if c.Name == IPRoute2FullBinary && hasToken(c.Args, "lookup") {
+			found = true
+		}
+		if hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+	if !found {
+		t.Fatal("policy routing must exec /opt/libexec/ip-full")
+	}
+}
+
+func TestMissingFullIPRoute2FailsUDPExplicitly(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.pathIPBusyBox = true
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("", false, true)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.UDPCapture != UDPCaptureUnsupported || rep.IPRoute2 != ClassIPRoute2FullRequired {
+		t.Fatalf("UDP must fail closed: %+v", rep)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("TCP Apply: %v", err)
+	}
+	snap := fx.snapshot()
+	if planHasSeq(snap, "-j", "TPROXY") || planHasSeq(snap, "lookup", "4254") || planHasSeq(snap, "lookup", "main") {
+		t.Fatal("must not install half-working UDP TPROXY without full iproute2")
+	}
+	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT must remain")
+	}
+}
+
+func TestMissingAddrtypeUsesExcludeFallback(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	eng.SetRoutingCaps("ip", true, false)
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planHasSeq(p.Install, "addrtype") {
+		t.Fatal("addrtype must be absent from the KN plan")
+	}
+	if !planHasIPSetAdd(p.Install, SetExcludeV4, "172.16.0.0/12") {
+		t.Fatal("RFC1918 exclude missing")
+	}
+	if !planHasSeq(p.Install, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT missing")
 	}
 }
 
@@ -218,12 +362,163 @@ func TestPortCollision(t *testing.T) {
 	}
 }
 
-func TestXKeenCollision(t *testing.T) {
+func TestPREROUTINGInsertedAtHead(t *testing.T) {
+	eng := newTestEngine(t, newFakeExecutor())
+	p, err := eng.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planHasSeq(p.Install, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump must insert at PREROUTING head")
+	}
+	if !planHasSeq(p.Install, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("mangle BTKN jump must insert at PREROUTING head")
+	}
+	if planHasSeq(p.Install, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump must not append after foreign PREROUTING")
+	}
+	if planHasSeq(p.Install, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+		t.Fatal("mangle BTKN jump must not append after foreign PREROUTING")
+	}
+}
+
+func TestBusyBoxTable4254DoesNotBlockApply(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("BusyBox ip rejecting table 4254 must still Apply TCP capture: %v", err)
+	}
+	if !eng.applied {
+		t.Fatal("applied")
+	}
+	if !planHasSeq(fx.snapshot(), "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump missing after BusyBox table skip")
+	}
+	if planHasSeq(fx.snapshot(), "-j", "TPROXY") {
+		t.Fatal("UDP TPROXY must be omitted without full iproute2")
+	}
+	for _, c := range fx.snapshot() {
+		if c.Name == "ip" && hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+}
+
+func TestBusyBoxTable4254RemoveIsIdempotent(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	if err := eng.Remove(context.Background()); err != nil {
+		t.Fatalf("Remove on BusyBox without table 4254: %v", err)
+	}
+}
+
+func TestAddrtypeMatchUnavailableDoesNotBlockApply(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, false)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("iptables addrtype unavailable must still Apply TCP capture: %v", err)
+	}
+	if !eng.applied {
+		t.Fatal("applied")
+	}
+	snap := fx.snapshot()
+	if !planHasSeq(snap, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("nat BTKN jump missing after addrtype skip")
+	}
+	if !planHasSeq(snap, "-t", "nat", "-A", ChainTCP, "-p", "tcp", "-j", "REDIRECT", "--to-ports", "11820") {
+		t.Fatal("TCP REDIRECT 11820 missing after addrtype skip")
+	}
+	if planHasSeq(snap, "addrtype") {
+		t.Fatal("addrtype must be omitted from the KN plan")
+	}
+	if !planHasSeq(snap, "add", SetExcludeV4, "172.16.0.0/12", "-exist") {
+		t.Fatal("RFC1918 exclude missing; addrtype skip must not drop ipset RETURN")
+	}
+	for _, c := range snap {
+		if c.Name == "ip" && hasToken(c.Args, "del") && hasToken(c.Args, "0x111") {
+			t.Fatal("must not delete XKeen mark 0x111")
+		}
+	}
+}
+
+func TestBusyBoxTable4254IsNotPreflightCollision(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if hasKind(rep, CollisionTable) {
+		t.Fatalf("unsupported table 4254 must not collide: %+v", rep)
+	}
+}
+
+func TestXKeenIPv6WildcardListenIsLive(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssErr = errors.New("ss: not found")
+	fx.tcpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	fx.udpOut = fx.tcpOut
+	fx.tcp6Out = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000000000000000000000000000:049D 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1"
+	fx.udp6Out = fx.tcp6Out
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen"
+	fx.busyBoxTable = true
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
+	rep, err := eng.Preflight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.XKeenState != XKeenLive {
+		t.Fatalf(":::1181 in tcp6 must be XKeenLive, got %s", rep.XKeenState)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply beside tcp6 XKeen: %v", err)
+	}
+}
+
+func TestProcNet11820WithExpectedPIDIsOurs(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.ssErr = errors.New("ss: not found")
+	fx.tcpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:2E2C 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1 0000000000000000 100 0 0 10 0"
+	fx.udpOut = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	fx.busyBoxTable = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.pidofOut = "25942"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\n"
+	fx.exeByPID = map[int]string{42: OurXrayExecutable}
+	eng := newTestEngine(t, fx)
+	eng.SetRoutingCaps("ip", false, true)
+	eng.SetExpectedListener(ExpectedListener{Executable: OurXrayExecutable, PID: 42})
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("OUR Xray on 11820 without ss pid must Apply: %v", err)
+	}
+}
+
+func TestXKeenLiveAllowsApplyWithoutMutatingXKeen(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -m comment --comment xkeen_rule -p tcp -j REDIRECT --to-ports 1181"
 	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -m socket --transparent -j RETURN\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
 	fx.pidofOut = "25942"
 	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=8))\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:* users:((\"xray\",pid=25942,fd=7))"
 	eng := newTestEngine(t, fx)
 
 	if _, err := eng.Plan(); err != nil {
@@ -236,11 +531,40 @@ func TestXKeenCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight must work with XKeen: %v", err)
 	}
-	if !rep.XKeenActive || !hasKind(rep, CollisionXKeen) {
-		t.Fatalf("xkeen not reported: %+v", rep)
+	if rep.XKeenState != XKeenLive {
+		t.Fatalf("state=%s want XKEEN_LIVE", rep.XKeenState)
 	}
-	if err := eng.Apply(context.Background()); !errors.Is(err, ErrExistingCaptureEngine) {
+	if !rep.XKeenActive {
+		t.Fatal("live XKeen must be reported active")
+	}
+	if hasKind(rep, CollisionXKeen) {
+		t.Fatal("live XKeen must not be a blocking collision")
+	}
+	if !rep.OK {
+		t.Fatalf("live XKeen must allow Apply: %+v", rep)
+	}
+	if err := eng.Apply(context.Background()); err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("Apply must insert nat BTKN jump first")
+	}
+	for _, c := range after {
+		if isProbe(c.Name, c.Args) {
+			continue
+		}
+		line := argvLine(c)
+		if hasTokenArgs(c, "xkeen") {
+			t.Fatalf("must not mutate XKeen: %s", line)
+		}
+		if hasTokenArgs(c, "0x111") || hasTokenArgs(c, "1181") {
+			t.Fatalf("must not touch XKeen mark/port: %s", line)
+		}
+		args := strings.Join(c.Args, " ")
+		if strings.Contains(args, "lookup 111") || strings.Contains(args, "table 111") {
+			t.Fatalf("must not touch table 111: %s", line)
+		}
 	}
 }
 
@@ -296,7 +620,7 @@ func TestDisabledRemoveOwnedNeverTouchesXKeen(t *testing.T) {
 		if strings.Contains(args, "lookup 111") || strings.Contains(args, "table 111") {
 			t.Fatalf("RemoveOwned must not touch table 111: %s", line)
 		}
-		if c.Name == "iptables" && hasTokenArgs(c, "-A") && hasTokenArgs(c, "BTKN_PRE") && hasTokenArgs(c, "PREROUTING") {
+		if c.Name == "iptables" && (hasTokenArgs(c, "-A") || hasTokenArgs(c, "-I")) && hasTokenArgs(c, "BTKN_PRE") && hasTokenArgs(c, "PREROUTING") {
 			t.Fatalf("disabled Reconcile must not Apply BTKN jump: %s", line)
 		}
 	}
@@ -309,10 +633,10 @@ func TestApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := fx.snapshot()
-	if !callsHaveSeq(calls, "-t", "nat", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !callsHaveSeq(calls, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("Apply did not attach nat hook")
 	}
-	if !callsHaveSeq(calls, "-t", "mangle", "-A", "PREROUTING", "-j", ChainPRE) {
+	if !callsHaveSeq(calls, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
 		t.Fatal("Apply did not attach mangle hook")
 	}
 	if !eng.applied {
@@ -756,6 +1080,59 @@ func TestReconcileNDMPartialLeftovers(t *testing.T) {
 	})
 }
 
+func TestReconcileRestoresMangleAfterForeignXKeenRewrite(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.natS = "-N BTKN_PRE\n-N BTKN_TCP\n-A PREROUTING -j BTKN_PRE\n-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.ipRule = "9:\tfrom all fwmark 0x111 lookup 111\n"
+	fx.pidofOut = "20972"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:*"
+	eng := newTestEngine(t, fx)
+	if err := eng.Reconcile(context.Background(), true); err != nil {
+		t.Fatalf("Reconcile after mangle wipe: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("must reinsert mangle BTKN_PRE at PREROUTING head")
+	}
+	if !callsHaveSeq(after, "-t", "mangle", "-A", ChainUDP, "-p", "udp", "-j", "TPROXY", "--on-ip", TProxyAddress, "--on-port", "11820", "--tproxy-mark", tproxyMarkSpec()) {
+		t.Fatal("must reinstall UDP TPROXY 11820")
+	}
+	for _, c := range after {
+		if isProbe(c.Name, c.Args) {
+			continue
+		}
+		if hasTokenArgs(c, "0x111") && (hasTokenArgs(c, "del") || hasTokenArgs(c, "delete") || hasTokenArgs(c, "-D") || hasTokenArgs(c, "-X") || hasTokenArgs(c, "-F")) {
+			t.Fatalf("must not delete XKeen mark 0x111: %s", argvLine(c))
+		}
+		if hasTokenArgs(c, "xkeen") {
+			t.Fatalf("must not mutate XKeen: %s", argvLine(c))
+		}
+	}
+}
+
+func TestApplyContinuesWhenChainExists(t *testing.T) {
+	fx := newFakeExecutor()
+	fx.rejectExistingChain = true
+	fx.natS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p tcp -j REDIRECT --to-ports 1181"
+	fx.mangleS = "-N xkeen\n-A PREROUTING -j xkeen\n-A xkeen -p udp -j TPROXY --on-port 1181 --on-ip 127.0.0.1 --tproxy-mark 0x111"
+	fx.pidofOut = "20972"
+	fx.pidofErr = nil
+	fx.ssOut = "udp UNCONN 0 0 0.0.0.0:1181 0.0.0.0:*\ntcp LISTEN 0 0 0.0.0.0:1181 0.0.0.0:*"
+	eng := newTestEngine(t, fx)
+	if err := eng.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply must treat existing BTKN chains as idempotent: %v", err)
+	}
+	after := fx.snapshot()
+	if !callsHaveSeq(after, "-t", "nat", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("idempotent Apply must still insert nat PREROUTING jump")
+	}
+	if !callsHaveSeq(after, "-t", "mangle", "-I", "PREROUTING", "1", "-j", ChainPRE) {
+		t.Fatal("idempotent Apply must still insert mangle PREROUTING jump")
+	}
+}
+
 func TestForeignCollisionNoAutopick(t *testing.T) {
 	fx := newFakeExecutor()
 	fx.tableOut = "local default dev lo table 4254 scope host"
@@ -840,12 +1217,16 @@ func ipsetAdds(cmds []Argv, set string) []string {
 }
 
 func planHasSeq(cmds []Argv, seq ...string) bool {
-	for _, c := range cmds {
+	return planSeqIndex(cmds, seq...) >= 0
+}
+
+func planSeqIndex(cmds []Argv, seq ...string) int {
+	for i, c := range cmds {
 		if hasSeq(c.Args, seq...) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func planHasToken(cmds []Argv, tok string) bool {
@@ -926,7 +1307,7 @@ func checkForeignChain(c Argv) error {
 	if strings.HasPrefix(chain, "BTKN_") {
 		return nil
 	}
-	if chain == "PREROUTING" && (mut == "-A" || mut == "-D" || mut == "--append" || mut == "--delete") {
+	if chain == "PREROUTING" && (mut == "-A" || mut == "-I" || mut == "-D" || mut == "--append" || mut == "--insert" || mut == "--delete") {
 		if hasSeq(c.Args, "-j", ChainPRE) {
 			return nil
 		}
