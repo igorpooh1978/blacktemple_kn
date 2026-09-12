@@ -4,6 +4,43 @@ Filled from real KN-1011 SSH sessions. Unit tests are not hardware PASS.
 No IP, MAC, BlackKey, HMAC, or provider host values belong here.
 Test client alias: `TEST_CLIENT-A`. Other XKeen device alias: `XKEEN-CLIENT-B`.
 
+## 2026-09-12 IPv4 STUN srflx A/B
+
+Same STUN page on the router, same TEST_CLIENT-A (Default/empty policy), igorpooh-box Policy0 never selected.
+
+```text
+CAPTURE ON (pref 4253 RFC1918 lookup main + table 4254 local lo):
+  Apply: production netfilter-reconcile result=success
+  selected set count: 1 (TEST_CLIENT-A)
+  igorpooh-box / XKEEN-CLIENT-B not in ipset
+  OUTPUT BTKN attach: NO
+  TEST_CLIENT-A WebRTC: SRFLX=YES IP4=YES IP6=NO
+  poller peak: EARLY=52 PRE=6828 UDP=4 TPROXY=2 ACC=1 OUTI=21 OUTM=0
+  watchdog mangle reattach: 34 (Keenetic still wipes BTKN_PRE)
+  AFTER snapshot counters reset by reattach; do not use CASE_A2 from AFTER
+
+CAPTURE OFF (same URL, no BTKN, 11820 inactive):
+  TEST_CLIENT-A WebRTC: SRFLX=NO IP4=NO IP6=NO
+  capture.enabled=false
+  fwmark 0x42544b4e / table 4254: absent
+  XKeen PID 20972 / 1181 / 0x111 / table 111 unchanged
+  SOCKS generate_204: 204
+
+INTERPRETATION:
+  WAN-only STUN does not produce IPv4 srflx on this path.
+  IPv4 srflx with capture on is not Keenetic WAN NAT.
+  SELECTED CLIENT UDP TPROXY + IPv4 srflx = VERIFIED (this A/B)
+  IPv6 srflx = not required for IPv4 TPROXY
+  protocol SUPPORTED label = NOT SET (ADR-011; mangle flap remains)
+  production Connect still SOCKS-only; live test merged tunnel inbounds
+
+CLEANUP:
+  capture.enabled=false
+  BTKN chains/ipset/fwmark/table 4254 gone
+  11820 inactive
+  SSH alive, XKeen unchanged
+```
+
 ## 2026-09-12 UDP iproute2 fix
 
 ```text
