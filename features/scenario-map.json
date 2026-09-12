@@ -824,6 +824,11 @@
       "tests": ["src/internal/api/handler_test.go::TestChangePasswordThenLogin"],
       "redProof": "RED: TestChangePasswordThenLogin FAIL until POST /api/v1/auth/password updates the hash"
     },
+    "BTKN-AUTH-005": {
+      "priority": "P0",
+      "tests": ["src/internal/api/handler_test.go::TestLogout"],
+      "redProof": "RED: TestLogout FAIL until POST /api/v1/auth/logout clears the session; UI Выйти maps to LOGIN"
+    },
     "BTKN-PROF-008": {
       "priority": "P0",
       "tests": ["src/internal/profiles/persist_test.go::TestHTTPSImportParse"],

@@ -249,6 +249,12 @@ export function postChangePassword(
   });
 }
 
+export function postLogout(): Promise<Response> {
+  return apiFetch("/api/v1/auth/logout", {
+    method: "POST",
+  });
+}
+
 export function postConnection(op: ConnectionOp): Promise<Response> {
   return apiFetch("/api/v1/connection", {
     method: "POST",

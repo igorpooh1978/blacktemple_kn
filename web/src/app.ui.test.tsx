@@ -48,6 +48,7 @@ function stubApi(opts: {
   setupStatus?: number;
   loginStatus?: number;
   passwordStatus?: number;
+  logoutStatus?: number;
   connectionStatus?: number;
   profileStatus?: number;
   version?: {
@@ -87,6 +88,9 @@ function stubApi(opts: {
     }
     if (url.includes("/api/v1/auth/login") && method === "POST") {
       return jsonRes(opts.loginStatus ?? 200);
+    }
+    if (url.includes("/api/v1/auth/logout") && method === "POST") {
+      return jsonRes(opts.logoutStatus ?? 204);
     }
     if (url.includes("/api/v1/auth/password") && method === "POST") {
       return jsonRes(opts.passwordStatus ?? 204);
@@ -343,5 +347,26 @@ describe("advanced screen", () => {
     findButton("Назад").click();
     await see("VPN отключён");
     expect(root.textContent).toContain("Подключить");
+  });
+
+  it("logs out from advanced and returns to login without session-expired copy", async () => {
+    stubApi({
+      statusBody: disconnectedStatus(),
+      version: {
+        version: "0.1.0-dev",
+        goos: "linux",
+        goarch: "mipsle",
+        gomips: "softfloat",
+        cgo: "0",
+      },
+    });
+    mount();
+    await see("VPN отключён");
+    findButton("Дополнительно").click();
+    await see("Пароль панели");
+    findButton("Выйти").click();
+    await see("Вход");
+    expect(root.textContent).not.toContain("Сессия истекла. Войдите снова.");
+    expect(root.textContent).not.toContain("VPN отключён");
   });
 });

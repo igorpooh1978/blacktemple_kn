@@ -31,3 +31,10 @@ Feature: Auth session routing
     When POST /api/v1/auth/password succeeds with current and new
     Then login with the old password fails
     And login with the new password succeeds
+
+  @BTKN-AUTH-005 @P0 @auth
+  Scenario: Logout from the panel returns to Login
+    Given an authenticated UI
+    When POST /api/v1/auth/logout succeeds
+    Then the UI shows LOGIN
+    And the session-expired message is not shown

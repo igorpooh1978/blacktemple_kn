@@ -3,6 +3,7 @@ import {
   IconCpu,
   IconInfoCircle,
   IconLock,
+  IconLogout,
   IconRefresh,
 } from "../ui/tabler";
 import type { Status, VersionInfo, XrayState } from "../api";
@@ -30,6 +31,7 @@ export function AdvancedScreen(props: {
   onNewPassword: (value: string) => void;
   onNewRepeat: (value: string) => void;
   onChangePassword: (ev: Event) => void;
+  onLogout: () => void;
   onBack: () => void;
 }) {
   const xray = props.status.xray;
@@ -129,6 +131,17 @@ export function AdvancedScreen(props: {
             Сменить пароль
           </Button>
         </form>
+        <p class="auth-aux">
+          <Button
+            variant="ghost"
+            block
+            disabled={props.busy}
+            onClick={props.onLogout}
+            icon={<IconLogout size={ICON_SIZE_SM} stroke={ICON_STROKE} />}
+          >
+            Выйти
+          </Button>
+        </p>
       </Card>
     </main>
   );

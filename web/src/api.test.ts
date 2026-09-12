@@ -6,6 +6,7 @@ import {
   postConnection,
   postLogin,
   postChangePassword,
+  postLogout,
   postProfile,
   postSetup,
 } from "./api";
@@ -55,6 +56,18 @@ describe("API client", () => {
       current: "old-pass-1",
       new: "new-pass-88",
     });
+  });
+
+  it("posts logout with credentials include", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postLogout();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/logout");
+    expect(init.credentials).toBe("include");
+    expect(init.method).toBe("POST");
   });
 
   it("posts connect op without claiming a session header beyond cookies", async () => {

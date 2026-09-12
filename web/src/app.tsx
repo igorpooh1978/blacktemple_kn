@@ -10,6 +10,7 @@ import {
   postConnection,
   postLogin,
   postChangePassword,
+  postLogout,
   postProfile,
   postSetup,
   readJson,
@@ -337,6 +338,27 @@ export function App() {
     }
   }
 
+  async function onLogout() {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      await postLogout();
+    } catch {
+      /* leave the panel even if the daemon is unreachable */
+    } finally {
+      setBlackKey("");
+      setKeyName("");
+      resetAuthFields();
+      setStatus(defaultDisconnectedStatus());
+      setVersion(null);
+      setScreen("login");
+      setError("");
+      setNotice("");
+      setBusy(false);
+    }
+  }
+
   async function openAdvanced() {
     setError("");
     setNotice("");
@@ -403,6 +425,7 @@ export function App() {
         onNewPassword={setNewPassword}
         onNewRepeat={setNewRepeat}
         onChangePassword={onChangePassword}
+        onLogout={onLogout}
         onBack={() => {
           setError("");
           setNotice("");
