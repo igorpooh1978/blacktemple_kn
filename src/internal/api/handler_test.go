@@ -2,7 +2,9 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +37,24 @@ func (stubStatus) Status() api.Status {
 			PID:   nil,
 		},
 	}
+}
+
+type snapshotStatus api.Status
+
+func (s snapshotStatus) Status() api.Status {
+	return api.Status(s)
+}
+
+type stubProfiles struct {
+	items []api.Profile
+}
+
+func (s stubProfiles) List(_ context.Context) ([]api.Profile, error) {
+	return s.items, nil
+}
+
+func (s stubProfiles) Import(_ context.Context, _, _ string) (api.Profile, error) {
+	return api.Profile{}, errors.New("import unused")
 }
 
 func newServer(t *testing.T, ttl time.Duration) (*api.Server, *auth.Service, string) {
@@ -207,6 +227,12 @@ func TestStatusFromProvider(t *testing.T) {
 	if xray["pid"] != nil {
 		t.Fatalf("pid %v", xray["pid"])
 	}
+	if body["country"] != "" {
+		t.Fatalf("unset country must be empty, got %v", body["country"])
+	}
+	if body["latencyMs"] != nil {
+		t.Fatalf("unset latencyMs must be null, got %v", body["latencyMs"])
+	}
 }
 
 func TestCSRFRejectsCrossSitePOST(t *testing.T) {
@@ -263,5 +289,182 @@ func TestChangePasswordThenLogin(t *testing.T) {
 	}
 	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": next}, nil, ""); rec.Code != http.StatusOK {
 		t.Fatalf("new password %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStatusJSONIncludesCountryAndLatency(t *testing.T) {
+	lat := 42
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth: svc,
+		Status: snapshotStatus{
+			Connection: "connected",
+			Country:    "DE",
+			LatencyMs:  &lat,
+			Routing:    "smart",
+			ServerMode: "auto",
+			Key:        "active",
+			Geodata:    "missing",
+			Xray:       api.XrayProcess{State: "RUNNING"},
+		},
+		Version: api.VersionInfo{Version: "test"},
+		UI:      fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["country"] != "DE" {
+		t.Fatalf("country %v", body["country"])
+	}
+	if body["latencyMs"] != float64(42) {
+		t.Fatalf("latencyMs %v", body["latencyMs"])
+	}
+	if strings.Contains(rec.Body.String(), "blackKey") || strings.Contains(strings.ToLower(rec.Body.String()), "vless://") {
+		t.Fatalf("status leaked secret: %s", rec.Body.String())
+	}
+}
+
+func TestListProfilesOmitsSecrets(t *testing.T) {
+	const planted = "vless://ui-test-uuid@example.invalid:443"
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth:   svc,
+		Status: stubStatus{},
+		Profiles: stubProfiles{items: []api.Profile{
+			{ID: "p1", Name: "lab", Status: "active"},
+			{ID: "p2", Name: "home", Status: "ready"},
+		}},
+		Version: api.VersionInfo{Version: "test"},
+		UI:      fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	rec := doJSON(t, h, http.MethodGet, "/api/v1/profiles", nil, nil, "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth list %d", rec.Code)
+	}
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/setup", map[string]string{"password": testPassword}, nil, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("setup %d", rec.Code)
+	}
+	login := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": testPassword}, nil, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %d", login.Code)
+	}
+	cookies := login.Result().Cookies()
+	rec = doJSON(t, h, http.MethodGet, "/api/v1/profiles", nil, cookies, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list %d %s", rec.Code, rec.Body.String())
+	}
+	raw := rec.Body.String()
+	if strings.Contains(raw, planted) || strings.Contains(strings.ToLower(raw), "blackkey") {
+		t.Fatalf("list leaked secret: %s", raw)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list len %d", len(list))
+	}
+	if list[0]["name"] != "lab" || list[0]["status"] != "active" || list[0]["id"] != "p1" {
+		t.Fatalf("first %v", list[0])
+	}
+	if _, ok := list[0]["blackKey"]; ok {
+		t.Fatal("blackKey present")
+	}
+}
+
+type recordingConn struct {
+	last string
+}
+
+func (c *recordingConn) Control(_ context.Context, op string) error {
+	c.last = op
+	return nil
+}
+
+func TestStatusJSONIncludesGeodataLifecycle(t *testing.T) {
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth: svc,
+		Status: snapshotStatus{
+			Connection: "disconnected",
+			Country:    "",
+			Routing:    "smart",
+			ServerMode: "auto",
+			Key:        "missing",
+			Geodata:    "current",
+			Xray:       api.XrayProcess{State: "STOPPED"},
+		},
+		Version: api.VersionInfo{Version: "test"},
+		UI:      fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["geodata"] != "current" {
+		t.Fatalf("geodata %v", body["geodata"])
+	}
+	raw := rec.Body.String()
+	if strings.Contains(strings.ToLower(raw), "blackkey") || strings.Contains(raw, "vless://") {
+		t.Fatalf("status leaked secret: %s", raw)
+	}
+}
+
+func TestConnectionAcceptsRestartVPN(t *testing.T) {
+	conn := &recordingConn{}
+	svc, err := auth.New(auth.Config{DataDir: t.TempDir(), Iterations: 20000, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := api.New(api.Config{
+		Auth:       svc,
+		Status:     stubStatus{},
+		Connection: conn,
+		Version:    api.VersionInfo{Version: "test"},
+		UI:         fstest.MapFS{"index.html": {Data: []byte("ok")}},
+	})
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/auth/setup", map[string]string{"password": testPassword}, nil, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("setup %d", rec.Code)
+	}
+	login := doJSON(t, h, http.MethodPost, "/api/v1/auth/login", map[string]string{"password": testPassword}, nil, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login %d", login.Code)
+	}
+	cookies := login.Result().Cookies()
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/connection", map[string]string{"op": "restart-vpn"}, cookies, "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("restart-vpn %d %s", rec.Code, rec.Body.String())
+	}
+	if conn.last != "restart-vpn" {
+		t.Fatalf("op %q", conn.last)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/api/v1/connection", map[string]string{"op": "reconnect"}, cookies, "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("reconnect %d %s", rec.Code, rec.Body.String())
+	}
+	if conn.last != "reconnect" {
+		t.Fatalf("op %q", conn.last)
 	}
 }

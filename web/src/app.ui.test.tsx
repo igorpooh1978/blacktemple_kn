@@ -11,6 +11,9 @@ type StatusBody = {
   connection: "disconnected" | "connecting" | "connected" | "failed";
   routing: "smart" | "all" | "selected";
   serverMode: "auto" | "manual" | "failover" | "rotate";
+  country?: string;
+  latencyMs?: number | null;
+  geodata?: "missing" | "current" | "stale" | "unknown";
   key?: "missing" | "active" | "invalid";
   xray?: { state?: string; pid?: number | null; restartCount?: number };
 };
@@ -33,8 +36,11 @@ function disconnectedStatus(): StatusBody {
     routing: "smart",
     serverMode: "auto",
     key: "missing",
+    geodata: "missing",
   };
 }
+
+const connectionOps: string[] = [];
 
 function installFetch(impl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
   vi.stubGlobal("fetch", impl);
@@ -48,8 +54,11 @@ function stubApi(opts: {
   setupStatus?: number;
   loginStatus?: number;
   passwordStatus?: number;
+  logoutStatus?: number;
   connectionStatus?: number;
   profileStatus?: number;
+  profiles?: unknown;
+  profilesStatus?: number;
   version?: {
     version: string;
     goos: string;
@@ -60,6 +69,7 @@ function stubApi(opts: {
 }) {
   const statusBody = opts.statusBody ?? disconnectedStatus();
   const auth = opts.auth ?? { initialized: true, authenticated: true };
+  connectionOps.length = 0;
   installFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -88,11 +98,29 @@ function stubApi(opts: {
     if (url.includes("/api/v1/auth/login") && method === "POST") {
       return jsonRes(opts.loginStatus ?? 200);
     }
+    if (url.includes("/api/v1/auth/logout") && method === "POST") {
+      return jsonRes(opts.logoutStatus ?? 204);
+    }
     if (url.includes("/api/v1/auth/password") && method === "POST") {
       return jsonRes(opts.passwordStatus ?? 204);
     }
     if (url.includes("/api/v1/connection") && method === "POST") {
+      try {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { op?: string };
+        if (typeof body.op === "string") {
+          connectionOps.push(body.op);
+        }
+      } catch {
+        /* ignore malformed test bodies */
+      }
       return jsonRes(opts.connectionStatus ?? 202);
+    }
+    if (url.includes("/api/v1/profiles") && method === "GET") {
+      const code = opts.profilesStatus ?? 200;
+      if (code !== 200) {
+        return jsonRes(code);
+      }
+      return jsonRes(200, opts.profiles ?? []);
     }
     if (url.includes("/api/v1/profiles") && method === "POST") {
       return jsonRes(opts.profileStatus ?? 201);
@@ -237,6 +265,69 @@ describe("main connection hero", () => {
   });
 });
 
+describe("status facts and profiles", () => {
+  it("shows country and latency from GET /status", async () => {
+    stubApi({
+      statusBody: {
+        ...disconnectedStatus(),
+        connection: "connected",
+        key: "active",
+        country: "DE",
+        latencyMs: 42,
+      },
+    });
+    mount();
+    await see("VPN подключён");
+    await see("Страна");
+    await see("DE");
+    await see("Задержка");
+    await see("42 мс");
+    expect(root.textContent).not.toContain("Германия");
+    expect(root.textContent).toContain("Автоматически · DE · 42 мс");
+  });
+
+  it("shows an em dash when country and latencyMs are absent", async () => {
+    stubApi({ statusBody: disconnectedStatus() });
+    mount();
+    await see("Страна");
+    await see("Задержка");
+    expect(root.textContent).toContain("—");
+    expect(root.textContent).not.toContain(" мс");
+  });
+
+  it("lists redacted profile names and never renders blackKey", async () => {
+    stubApi({
+      statusBody: { ...disconnectedStatus(), key: "active" },
+      profiles: [
+        {
+          id: "p1",
+          name: "lab",
+          status: "active",
+          blackKey: SECRET,
+        },
+        { id: "p2", name: "home", status: "ready" },
+      ],
+    });
+    mount();
+    await see("lab");
+    await see("Активный");
+    await see("home");
+    await see("Готов");
+    expect(root.innerHTML).not.toContain(SECRET);
+    expect(root.textContent).not.toContain("blackKey");
+  });
+
+  it("shows geodata lifecycle copy from status", async () => {
+    stubApi({
+      statusBody: { ...disconnectedStatus(), geodata: "current" },
+    });
+    mount();
+    await see("Геоданные");
+    await see("Актуальные");
+    expect(root.textContent).not.toContain("current");
+  });
+});
+
 describe("BlackKey import", () => {
   it("does not put the secret back into the DOM after a successful import", async () => {
     stubApi({ statusBody: disconnectedStatus(), profileStatus: 201 });
@@ -335,6 +426,12 @@ describe("advanced screen", () => {
     await see("RUNNING");
     await see("4242");
     await see("Пароль панели");
+    await see("linux / mipsle");
+    await see("CGO");
+    await see("softfloat");
+    await see("Геоданные");
+    await see("Нет файлов");
+    expect(root.textContent).not.toContain("restart-manager");
     typeInto("currentPassword", "old-pass-1");
     typeInto("newPassword", "new-pass-88");
     typeInto("newRepeat", "new-pass-88");
@@ -343,5 +440,76 @@ describe("advanced screen", () => {
     findButton("Назад").click();
     await see("VPN отключён");
     expect(root.textContent).toContain("Подключить");
+  });
+
+  it("logs out from advanced and returns to login without session-expired copy", async () => {
+    stubApi({
+      statusBody: disconnectedStatus(),
+      version: {
+        version: "0.1.0-dev",
+        goos: "linux",
+        goarch: "mipsle",
+        gomips: "softfloat",
+        cgo: "0",
+      },
+    });
+    mount();
+    await see("VPN отключён");
+    findButton("Дополнительно").click();
+    await see("Пароль панели");
+    findButton("Выйти").click();
+    await see("Вход");
+    expect(root.textContent).not.toContain("Сессия истекла. Войдите снова.");
+    expect(root.textContent).not.toContain("VPN отключён");
+  });
+
+  it("posts restart-vpn from Advanced without inventing connected", async () => {
+    stubApi({
+      statusBody: disconnectedStatus(),
+      version: {
+        version: "0.1.0-dev",
+        goos: "linux",
+        goarch: "mipsle",
+        gomips: "softfloat",
+        cgo: "0",
+      },
+    });
+    mount();
+    await see("VPN отключён");
+    findButton("Дополнительно").click();
+    await see("Перезапустить VPN");
+    findButton("Перезапустить VPN").click();
+    await vi.waitFor(() => {
+      expect(connectionOps).toEqual(["restart-vpn"]);
+    });
+    expect(root.textContent).not.toContain("VPN подключён");
+    findButton("Назад").click();
+    await see("VPN отключён");
+    expect(root.textContent).not.toContain("VPN подключён");
+  });
+
+  it("posts reconnect from Advanced without inventing connected", async () => {
+    stubApi({
+      statusBody: disconnectedStatus(),
+      version: {
+        version: "0.1.0-dev",
+        goos: "linux",
+        goarch: "mipsle",
+        gomips: "softfloat",
+        cgo: "0",
+      },
+    });
+    mount();
+    await see("VPN отключён");
+    findButton("Дополнительно").click();
+    await see("Переподключить");
+    findButton("Переподключить").click();
+    await vi.waitFor(() => {
+      expect(connectionOps).toEqual(["reconnect"]);
+    });
+    expect(root.textContent).not.toContain("VPN подключён");
+    findButton("Назад").click();
+    await see("VPN отключён");
+    expect(root.textContent).not.toContain("VPN подключён");
   });
 });

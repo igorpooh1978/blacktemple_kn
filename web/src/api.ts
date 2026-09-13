@@ -10,6 +10,8 @@ export type ServerMode = "auto" | "manual" | "failover" | "rotate";
 
 export type KeyState = "missing" | "active" | "invalid";
 
+export type GeodataState = "missing" | "current" | "stale" | "unknown";
+
 export type XrayState =
   | "STOPPED"
   | "STARTING"
@@ -38,7 +40,7 @@ export type Status = {
   routing: RoutingMode;
   serverMode: ServerMode;
   key?: KeyState;
-  geodata?: string;
+  geodata?: GeodataState;
   errorClass?: ConnectionErrorClass;
   xray?: XrayProcess;
 };
@@ -51,7 +53,17 @@ export type VersionInfo = {
   cgo: string;
 };
 
-export type ConnectionOp = "connect" | "disconnect";
+export type Profile = {
+  id: string;
+  name?: string;
+  status?: string;
+};
+
+export type ConnectionOp =
+  | "connect"
+  | "disconnect"
+  | "reconnect"
+  | "restart-vpn";
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
@@ -109,6 +121,12 @@ function isKeyState(v: unknown): v is KeyState {
   return v === "missing" || v === "active" || v === "invalid";
 }
 
+function isGeodataState(v: unknown): v is GeodataState {
+  return (
+    v === "missing" || v === "current" || v === "stale" || v === "unknown"
+  );
+}
+
 function isXrayState(v: unknown): v is XrayState {
   return (
     v === "STOPPED" ||
@@ -146,7 +164,7 @@ export function parseStatus(data: unknown): Status | null {
   if (isKeyState(o.key)) {
     status.key = o.key;
   }
-  if (typeof o.geodata === "string") {
+  if (isGeodataState(o.geodata)) {
     status.geodata = o.geodata;
   }
   if (isConnectionErrorClass(o.errorClass)) {
@@ -170,6 +188,31 @@ export function parseStatus(data: unknown): Status | null {
     status.xray = proc;
   }
   return status;
+}
+
+export function parseProfiles(data: unknown): Profile[] | null {
+  if (!Array.isArray(data)) {
+    return null;
+  }
+  const out: Profile[] = [];
+  for (const item of data) {
+    if (item === null || typeof item !== "object") {
+      return null;
+    }
+    const o = item as Record<string, unknown>;
+    if (typeof o.id !== "string" || o.id === "") {
+      return null;
+    }
+    const profile: Profile = { id: o.id };
+    if (typeof o.name === "string") {
+      profile.name = o.name;
+    }
+    if (typeof o.status === "string") {
+      profile.status = o.status;
+    }
+    out.push(profile);
+  }
+  return out;
 }
 
 export function parseVersion(data: unknown): VersionInfo | null {
@@ -225,6 +268,10 @@ export function getVersion(): Promise<Response> {
   return apiFetch("/api/v1/version");
 }
 
+export function getProfiles(): Promise<Response> {
+  return apiFetch("/api/v1/profiles");
+}
+
 export function postSetup(password: string): Promise<Response> {
   return apiFetch("/api/v1/auth/setup", {
     method: "POST",
@@ -246,6 +293,12 @@ export function postChangePassword(
   return apiFetch("/api/v1/auth/password", {
     method: "POST",
     body: JSON.stringify({ current, new: next }),
+  });
+}
+
+export function postLogout(): Promise<Response> {
+  return apiFetch("/api/v1/auth/logout", {
+    method: "POST",
   });
 }
 

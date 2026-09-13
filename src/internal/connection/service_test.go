@@ -178,6 +178,9 @@ func TestImportAndConnectDisconnect(t *testing.T) {
 	if st.Routing != "smart" {
 		t.Fatalf("routing %q", st.Routing)
 	}
+	if st.LatencyMs != nil {
+		t.Fatalf("nil probe must not invent latencyMs, got %d", *st.LatencyMs)
+	}
 	raw, err := os.ReadFile(s.ConfigPath())
 	if err != nil {
 		t.Fatal(err)
@@ -191,6 +194,60 @@ func TestImportAndConnectDisconnect(t *testing.T) {
 	st = s.Status()
 	if st.Connection == "connected" || st.Xray.State != string(supervisor.StateStopped) {
 		t.Fatalf("after disconnect %+v", st)
+	}
+	if st.LatencyMs != nil {
+		t.Fatalf("disconnected latencyMs %v", st.LatencyMs)
+	}
+}
+
+type delayProbe struct {
+	d time.Duration
+}
+
+func (p delayProbe) WaitListener(context.Context, string, int) error { return nil }
+
+func (p delayProbe) Check(context.Context, string, int) error {
+	time.Sleep(p.d)
+	return nil
+}
+
+func TestStatusLatencyFromProbeAndClearsOnDisconnect(t *testing.T) {
+	eng := &fakeEngine{}
+	s := New(Config{
+		Profiles:    profiles.NewService(nil, nil),
+		Engine:      eng,
+		DataDir:     t.TempDir(),
+		ListenPort:  11080,
+		FastBackoff: true,
+		Probe:       delayProbe{d: 20 * time.Millisecond},
+	})
+	if _, err := s.Profiles().Import(context.Background(), profiles.ImportRequest{BlackKey: vlessShare(), Name: "lab"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Control(context.Background(), "connect"); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	if st.Connection != "connected" {
+		t.Fatalf("status=%+v", st)
+	}
+	if st.LatencyMs == nil {
+		t.Fatal("expected latencyMs from probe Check")
+	}
+	if *st.LatencyMs < 15 {
+		t.Fatalf("latencyMs %d, want at least probe sleep", *st.LatencyMs)
+	}
+	first := *st.LatencyMs
+	st = s.Status()
+	if st.LatencyMs == nil || *st.LatencyMs != first {
+		t.Fatalf("Status must not re-probe, got %v want %d", st.LatencyMs, first)
+	}
+	if err := s.Control(context.Background(), "disconnect"); err != nil {
+		t.Fatal(err)
+	}
+	st = s.Status()
+	if st.LatencyMs != nil {
+		t.Fatalf("after disconnect latencyMs %v", st.LatencyMs)
 	}
 }
 

@@ -1,15 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
-import type { ConnectionState, Status, VersionInfo } from "./api";
+import type { ConnectionOp, ConnectionState, Profile, Status, VersionInfo } from "./api";
 import {
   getAuthState,
+  getProfiles,
   getStatus,
   getVersion,
   parseAuthState,
+  parseProfiles,
   parseStatus,
   parseVersion,
   postConnection,
   postLogin,
   postChangePassword,
+  postLogout,
   postProfile,
   postSetup,
   readJson,
@@ -45,6 +48,7 @@ export function App() {
   const [newRepeat, setNewRepeat] = useState("");
   const [blackKey, setBlackKey] = useState("");
   const [keyName, setKeyName] = useState("");
+  const [profiles, setProfiles] = useState<Profile[]>([]);
 
   function expireSession() {
     setBlackKey("");
@@ -55,6 +59,7 @@ export function App() {
     setNewPassword("");
     setNewRepeat("");
     setStatus(defaultDisconnectedStatus());
+    setProfiles([]);
     setScreen("login");
     setError(SESSION_EXPIRED_MESSAGE);
     setNotice("");
@@ -76,6 +81,30 @@ export function App() {
     return true;
   }
 
+  async function loadProfiles(): Promise<void> {
+    const res = await getProfiles();
+    if (res.status === 401) {
+      expireSession();
+      return;
+    }
+    if (res.status !== 200) {
+      return;
+    }
+    const parsed = parseProfiles(await readJson(res));
+    if (parsed) {
+      setProfiles(parsed);
+    }
+  }
+
+  async function loadMain(): Promise<boolean> {
+    const ok = await loadStatus();
+    if (!ok) {
+      return false;
+    }
+    await loadProfiles();
+    return true;
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -91,7 +120,7 @@ export function App() {
         const next = screenFromAuthState(state);
         setScreen(next);
         if (next === "main") {
-          await loadStatus();
+          await loadMain();
         }
       } catch {
         /* daemon unreachable — stay on first-run */
@@ -117,7 +146,7 @@ export function App() {
               return;
             }
           }
-          await loadStatus();
+          await loadMain();
         } catch {
           /* keep last GET snapshot; never invent connected */
         }
@@ -164,7 +193,7 @@ export function App() {
         const loginRes = await postLogin(submitted);
         resetAuthFields();
         if (loginRes.status === 200) {
-          await loadStatus();
+          await loadMain();
           setScreen("main");
           return;
         }
@@ -191,7 +220,7 @@ export function App() {
       const res = await postLogin(submitted);
       if (res.status === 200) {
         resetAuthFields();
-        await loadStatus();
+        await loadMain();
         setScreen("main");
         return;
       }
@@ -207,11 +236,9 @@ export function App() {
     }
   }
 
-  async function onConnect() {
+  async function runConnection(op: ConnectionOp) {
     setError("");
     setNotice("");
-    const connected = status.connection === "connected";
-    const op = connected ? "disconnect" : "connect";
     setBusy(true);
     try {
       const res = await postConnection(op);
@@ -240,6 +267,11 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onConnect() {
+    const connected = status.connection === "connected";
+    await runConnection(connected ? "disconnect" : "connect");
   }
 
   async function onImportKey(ev: Event) {
@@ -274,7 +306,7 @@ export function App() {
       if (result.status === 201) {
         setKeyName("");
         setNotice("Готово");
-        await loadStatus();
+        await loadMain();
         return;
       }
       if (result.status === 501) {
@@ -333,6 +365,28 @@ export function App() {
     } catch {
       setError("Нет связи с устройством");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onLogout() {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      await postLogout();
+    } catch {
+      /* leave the panel even if the daemon is unreachable */
+    } finally {
+      setBlackKey("");
+      setKeyName("");
+      resetAuthFields();
+      setStatus(defaultDisconnectedStatus());
+      setProfiles([]);
+      setVersion(null);
+      setScreen("login");
+      setError("");
+      setNotice("");
       setBusy(false);
     }
   }
@@ -403,6 +457,13 @@ export function App() {
         onNewPassword={setNewPassword}
         onNewRepeat={setNewRepeat}
         onChangePassword={onChangePassword}
+        onRestartVpn={() => {
+          void runConnection("restart-vpn");
+        }}
+        onReconnect={() => {
+          void runConnection("reconnect");
+        }}
+        onLogout={onLogout}
         onBack={() => {
           setError("");
           setNotice("");
@@ -416,6 +477,7 @@ export function App() {
     <MainScreen
       connection={connection}
       status={status}
+      profiles={profiles}
       busy={busy}
       error={error}
       notice={notice}

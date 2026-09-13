@@ -8,6 +8,7 @@ export { default as IconKey } from "@tabler/icons-preact/dist/esm/icons/IconKey.
 export { default as IconLoader2 } from "@tabler/icons-preact/dist/esm/icons/IconLoader2.mjs";
 export { default as IconLock } from "@tabler/icons-preact/dist/esm/icons/IconLock.mjs";
 export { default as IconLogin } from "@tabler/icons-preact/dist/esm/icons/IconLogin.mjs";
+export { default as IconLogout } from "@tabler/icons-preact/dist/esm/icons/IconLogout.mjs";
 export { default as IconPower } from "@tabler/icons-preact/dist/esm/icons/IconPower.mjs";
 export { default as IconRefresh } from "@tabler/icons-preact/dist/esm/icons/IconRefresh.mjs";
 export { default as IconRoute } from "@tabler/icons-preact/dist/esm/icons/IconRoute.mjs";

@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getAuthState,
+  getProfiles,
   parseAuthState,
+  parseProfiles,
   parseStatus,
   postConnection,
   postLogin,
   postChangePassword,
+  postLogout,
   postProfile,
   postSetup,
 } from "./api";
@@ -57,6 +60,18 @@ describe("API client", () => {
     });
   });
 
+  it("posts logout with credentials include", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postLogout();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/logout");
+    expect(init.credentials).toBe("include");
+    expect(init.method).toBe("POST");
+  });
+
   it("posts connect op without claiming a session header beyond cookies", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 501 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -66,6 +81,17 @@ describe("API client", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.credentials).toBe("include");
     expect(JSON.parse(String(init.body))).toEqual({ op: "connect" });
+  });
+
+  it("posts restart-vpn with credentials include", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await postConnection("restart-vpn");
+    expect(res.status).toBe(202);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(String(init.body))).toEqual({ op: "restart-vpn" });
   });
 
   it("posts BlackKey once and does not add extra CSRF headers", async () => {
@@ -113,6 +139,44 @@ describe("parseStatus", () => {
       errorClass: "publicKey=abcde",
     })?.errorClass).toBeUndefined();
   });
+
+  it("keeps country and latencyMs without inventing them", () => {
+    const parsed = parseStatus({
+      connection: "connected",
+      routing: "smart",
+      serverMode: "auto",
+      country: "DE",
+      latencyMs: 42,
+    });
+    expect(parsed?.country).toBe("DE");
+    expect(parsed?.latencyMs).toBe(42);
+    const empty = parseStatus({
+      connection: "disconnected",
+      routing: "smart",
+      serverMode: "auto",
+    });
+    expect(empty?.country).toBeUndefined();
+    expect(empty?.latencyMs).toBeUndefined();
+  });
+
+  it("accepts geodata enum and drops other strings", () => {
+    expect(
+      parseStatus({
+        connection: "disconnected",
+        routing: "smart",
+        serverMode: "auto",
+        geodata: "current",
+      })?.geodata,
+    ).toBe("current");
+    expect(
+      parseStatus({
+        connection: "disconnected",
+        routing: "smart",
+        serverMode: "auto",
+        geodata: "vless://not-a-state",
+      })?.geodata,
+    ).toBeUndefined();
+  });
 });
 
 describe("auth state", () => {
@@ -136,5 +200,32 @@ describe("auth state", () => {
       authenticated: false,
     });
     expect(parseAuthState({ initialized: true })).toBeNull();
+  });
+});
+
+describe("profiles", () => {
+  it("GETs /api/v1/profiles with credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ id: "p1", name: "lab", status: "active" }]), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await getProfiles();
+    expect(res.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/profiles");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("parses redacted profile fields and drops blackKey", () => {
+    const parsed = parseProfiles([
+      { id: "p1", name: "lab", status: "active", blackKey: "bk_secret" },
+    ]);
+    expect(parsed).toEqual([{ id: "p1", name: "lab", status: "active" }]);
+    expect(JSON.stringify(parsed)).not.toContain("blackKey");
+    expect(JSON.stringify(parsed)).not.toContain("bk_secret");
+    expect(parseProfiles({})).toBeNull();
+    expect(parseProfiles([{ name: "lab" }])).toBeNull();
   });
 });

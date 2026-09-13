@@ -95,3 +95,11 @@ Feature: Connection
     When a new Service opens the same DataDir with the fixture closed
     Then resolved candidates and LKG are restored
     And connect does not fetch the provider
+
+  @BTKN-CONN-016 @P0 @connection
+  Scenario: Status latencyMs comes from the SOCKS generate_204 probe
+    Given a connected session whose probe Check succeeded
+    Then Status latencyMs is the Check duration in milliseconds
+    And Status does not issue generate_204 on each read
+    And after disconnect latencyMs is null
+    And a nil probe does not invent latencyMs
